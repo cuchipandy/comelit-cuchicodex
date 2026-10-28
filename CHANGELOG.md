@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.5 — 2026-10-28
+
+- Serialize Answer Doorbell with inbound setup so answering an early notification
+  waits for the passive session and activates its audio instead of racing startup.
+- Let Answer Doorbell start manual media when no physical ring exists, supporting
+  app/Tasker tests without guessing the session state from a camera entity.
+- Report video-start and answer failures as service errors instead of silently
+  telling the app the request succeeded.
+- Add regressions for early answer, test intents without a ring and failed audio setup.
+
 ## 1.5.4 — 2026-10-28
 
 - Enable MT-6741W manual-view audio using the official app's captured 48-byte

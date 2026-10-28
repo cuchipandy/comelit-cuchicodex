@@ -699,11 +699,23 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
             _LOGGER.info("Inbound video ready, ring fired (entrance=%s)", entrance_addr)
 
     async def async_answer_inbound(self) -> None:
-        """Answer an active passive inbound call — send answer signals, start audio."""
-        if self._video_session and self._video_session.active:
-            await self._video_session.answer_inbound()
-            self._inbound_answered = True
-            self._pending_inbound_ring = None
+        """Wait for inbound setup, then answer; start manual media for test calls.
+
+        A notification can be accepted before start_inbound publishes its
+        session. Serialize with setup instead of interpreting that interval
+        as an idle camera and starting a competing outbound call.
+        """
+        async with self._video_start_lock:
+            session = self._video_session
+            if session and session.active:
+                await session.answer_inbound()
+                self._inbound_answered = True
+                self._pending_inbound_ring = None
+                return
+
+        # No physical ring exists (for example, a Tasker intent test). Do not
+        # keep the lock here: async_start_video acquires it itself.
+        await self.async_start_video(by_user=True)
 
     async def _register_go2rtc_stream(self) -> None:
         """Register our RTSP stream with go2rtc, enabling backchannel support.

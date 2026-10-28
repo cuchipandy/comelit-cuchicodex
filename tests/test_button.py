@@ -12,6 +12,7 @@ from custom_components.comelit_man.button import (
     ComelitStartVideoButton,
     ComelitStopVideoButton,
 )
+from custom_components.comelit_man.exceptions import VideoCallError
 from custom_components.comelit_man.models import Door
 
 
@@ -229,7 +230,8 @@ class TestComelitStartVideoButton:
         coordinator.device_config = MagicMock()
         coordinator.async_start_video = AsyncMock(side_effect=RuntimeError("fail"))
         btn = ComelitStartVideoButton(coordinator, "entry_abc")
-        await btn.async_press()  # must not raise
+        with pytest.raises(VideoCallError):
+            await btn.async_press()
 
 
 # ---------------------------------------------------------------------------
@@ -304,8 +306,9 @@ class TestComelitAnswerDoorbellButton:
         btn.coordinator.async_answer_inbound.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_press_does_not_raise_on_failure(self):
-        """A failed answer must not surface as an unhandled service error."""
+    async def test_press_reports_answer_failure_to_service_caller(self):
+        """Clients must not continue into WebRTC after a failed answer."""
         btn = _make_answer_button()
         btn.coordinator.async_answer_inbound = AsyncMock(side_effect=RuntimeError("no session"))
-        await btn.async_press()  # must not raise
+        with pytest.raises(VideoCallError):
+            await btn.async_press()

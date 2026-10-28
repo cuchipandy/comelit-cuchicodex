@@ -1501,6 +1501,57 @@ class TestOnCallIdle:
         session.answer_inbound.assert_awaited_once()
         assert coord._inbound_answered is True
 
+    @pytest.mark.asyncio
+    async def test_answer_waits_for_inbound_initialization_without_starting_manual_view(self):
+        coord = _make_coordinator()
+        coord.async_start_video = AsyncMock()
+        session = MagicMock(active=True)
+        session.answer_inbound = AsyncMock()
+        await coord._video_start_lock.acquire()
+        task = asyncio.create_task(coord.async_answer_inbound())
+        try:
+            await asyncio.sleep(0)
+            assert not task.done()
+            coord.async_start_video.assert_not_awaited()
+            session.answer_inbound.assert_not_awaited()
+            coord._video_session = session
+            coord._pending_inbound_ring = "SB100001"
+            coord._video_start_lock.release()
+            await asyncio.wait_for(task, 1)
+            session.answer_inbound.assert_awaited_once()
+            coord.async_start_video.assert_not_awaited()
+            assert coord._inbound_answered is True
+            assert coord._pending_inbound_ring is None
+        finally:
+            if coord._video_start_lock.locked():
+                coord._video_start_lock.release()
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    @pytest.mark.asyncio
+    async def test_answer_without_physical_ring_starts_manual_media_outside_lock(self):
+        coord = _make_coordinator()
+
+        async def start(**kwargs):
+            assert kwargs == {"by_user": True}
+            assert not coord._video_start_lock.locked()
+
+        coord.async_start_video = AsyncMock(side_effect=start)
+        await coord.async_answer_inbound()
+        coord.async_start_video.assert_awaited_once_with(by_user=True)
+        assert coord._inbound_answered is False
+
+    @pytest.mark.asyncio
+    async def test_failed_answer_does_not_mark_inbound_as_answered(self):
+        coord = _make_coordinator()
+        coord._video_session = MagicMock(active=True)
+        coord._video_session.answer_inbound = AsyncMock(side_effect=RuntimeError("audio unavailable"))
+        coord._pending_inbound_ring = "SB100001"
+        with pytest.raises(RuntimeError, match="audio unavailable"):
+            await coord.async_answer_inbound()
+        assert coord._inbound_answered is False
+        assert coord._pending_inbound_ring == "SB100001"
+
 
 # ---------------------------------------------------------------------------
 # _on_ring_during_video (Phase 2: mid-call ring event)

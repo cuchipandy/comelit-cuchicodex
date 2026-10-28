@@ -13,6 +13,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import ComelitLocalConfigEntry, ComelitLocalCoordinator
 from .entity import ComelitEntity
+from .exceptions import VideoCallError
 from .models import Door
 
 _LOGGER = logging.getLogger(__name__)
@@ -118,8 +119,9 @@ class ComelitStartVideoButton(ComelitEntity, ButtonEntity):
         try:
             await self.coordinator.async_start_video(by_user=True)
             _LOGGER.debug("Video ready in %.1fs", time.monotonic() - t0)
-        except Exception:
+        except Exception as err:
             _LOGGER.exception("Failed to start intercom video after %.1fs", time.monotonic() - t0)
+            raise VideoCallError("No se pudo iniciar el vídeo del portero") from err
 
 
 class ComelitStopVideoButton(ComelitEntity, ButtonEntity):
@@ -167,5 +169,6 @@ class ComelitAnswerDoorbellButton(ComelitEntity, ButtonEntity):
         _LOGGER.info("Answering doorbell — starting audio")
         try:
             await self.coordinator.async_answer_inbound()
-        except Exception:
+        except Exception as err:
             _LOGGER.exception("Failed to answer doorbell")
+            raise VideoCallError("No se pudo activar el audio de la llamada del portero") from err
