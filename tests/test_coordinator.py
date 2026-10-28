@@ -25,6 +25,41 @@ async def test_video_renewal_hands_registration_timestamp_back_to_listener():
     coord._ensure_vip_listener.assert_awaited_once()
 
 
+async def test_manual_audio_reopen_waits_remaining_panel_release_interval():
+    coord = _make_coordinator(with_client=True)
+    old_session = MagicMock(manual_audio_used=True)
+    old_session.stop = AsyncMock()
+    coord._video_session = old_session
+    coord._ensure_vip_listener = AsyncMock()
+    with patch("custom_components.comelit_man.coordinator.time.monotonic", return_value=100):
+        await coord.async_stop_video()
+    assert coord._video_reopen_after == 120
+    new_session = MagicMock()
+    new_session.start = AsyncMock()
+    with (
+        patch("custom_components.comelit_man.coordinator.time.monotonic", return_value=105),
+        patch("custom_components.comelit_man.coordinator.asyncio.sleep", new_callable=AsyncMock) as sleep,
+        patch("custom_components.comelit_man.coordinator.VideoCallSession", return_value=new_session),
+    ):
+        await coord.async_start_video(by_user=True)
+    sleep.assert_awaited_once_with(15)
+    new_session.start.assert_awaited_once()
+
+
+async def test_stop_cancels_a_manual_open_waiting_for_the_panel():
+    coord = _make_coordinator(with_client=True)
+    coord._video_reopen_after = 120
+    with (
+        patch("custom_components.comelit_man.coordinator.time.monotonic", return_value=105),
+        patch("custom_components.comelit_man.coordinator.asyncio.sleep", new_callable=AsyncMock) as sleep,
+        patch("custom_components.comelit_man.coordinator.VideoCallSession") as factory,
+    ):
+        sleep.side_effect = lambda _: coord.request_video_stop()
+        with pytest.raises(RuntimeError, match="cancelled"):
+            await coord.async_start_video(by_user=True)
+    factory.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

@@ -79,6 +79,9 @@ reported for the MT-6741W. Live testing on one MT-6741W on 2026-10-28
 received **640x240 at approximately 25 fps**, not 1024x608. The requested
 profile is not a guarantee of native camera resolution. The profile
 is used for incoming calls, manual viewing and call renewals. Both resolution fields are set to 1024x608, matching the app screenshot.
+Maximum also sends the app's captured 1000-kbps HD setting. Decoding a capture
+of the official app on this installation likewise produced 640x240, including
+the segments with HD enabled.
 Legacy profiles retain the captured secondary 320x240 fields. H.264 is relayed without upscaling or
 transcoding, with a maximum 1400-byte payload when the RTSP server packetizes
 NAL units. In pass-through mode the original device packet boundaries are kept;
@@ -88,14 +91,21 @@ select Compatible again.
 
 For talking back, use **comelit-doorbell-card**, configure `answer_entity`,
 open Home Assistant over **HTTPS** (local TLS or a remote HTTPS URL), and allow
-microphone access. Press **Answer** during an incoming doorbell call. The card
+microphone access. Press **Answer** to enable the microphone, either while
+viewing the camera manually or during an incoming doorbell call. The card
 negotiates G.711 audio, enables the microphone when answered, and restores it
 on reconnection. A permission refusal now has its own message. HTTP still allows
 video and listening, but browser microphone capture requires a secure origin.
-**MT-6741W self-view audio remains unresolved:** manual viewing on the tested
-monitor delivered zero audio RTP packets, even after the known answer sequences
-and TCP/UDP audio carrier tests. The app has separate audio controls; do not
-interpret the presence of an RTSP audio track as proof of entrance audio.
+**MT-6741W manual viewing now enables entrance audio without a doorbell ring.**
+The microphone remains controlled by the card's Answer/mute controls. Live
+testing confirmed incoming PCMA and outgoing backchannel packet flow; hearing
+and microphone intelligibility still need an on-site check. The presence of an
+RTSP audio track alone does not prove entrance audio is arriving.
+After closing a manual session that used audio, the integration keeps a
+**20-second interval before starting another manual session**. Live MT-6741W
+tests passed with this interval; faster reopen could negotiate successfully
+but deliver no audio. An early reopen waits for the remaining interval, and
+Stop cancels that pending start. Incoming doorbell calls use their own flow.
 
 Download the integration diagnostics while the call is active to compare
 `requested_quality` with `received_dimensions`. The latter is measured from

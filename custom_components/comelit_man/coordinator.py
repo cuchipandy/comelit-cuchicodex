@@ -45,6 +45,7 @@ RING_DEDUP_WINDOW = 120.0
 # A device 0x1840/0x0000 (idle) counts as a missed call only when it follows
 # a ring this recently; otherwise it is video-teardown / CTPP-init tail.
 MISSED_CALL_WINDOW = 45.0
+MANUAL_AUDIO_REOPEN_DELAY = 20.0  # MT-6741W live-tested interval after an audio call
 
 
 class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
@@ -54,6 +55,7 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
     # is always constructed with one, so narrowing it here removes a dozen
     # union-attr suppressions at the use sites.
     config_entry: ComelitLocalConfigEntry
+    _video_reopen_after = 0.0
 
     def __init__(
         self,
@@ -429,6 +431,12 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
 
             self._video_stopped_by_user = False
             await self.async_stop_video()
+            reopen_delay = self._video_reopen_after - time.monotonic()
+            if reopen_delay > 0:
+                _LOGGER.info("Waiting %.1fs before reopening manual-view audio", reopen_delay)
+                await asyncio.sleep(reopen_delay)
+                if self._video_stopped_by_user:
+                    raise RuntimeError("Video start cancelled while waiting for the panel")
 
             # Pause the VIP listener task so it doesn't consume CTPP messages
             # meant for the video session. The CTPP channel itself stays open
@@ -876,6 +884,10 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
                 _LOGGER.exception("Error in stop-video callback")
 
         await session.stop(reason="user stopped")
+        if session.manual_audio_used is True:
+            # Rapid reopen accepted signaling but yielded no audio on the
+            # tested MT-6741W; the 20-second interval passed live validation.
+            self._video_reopen_after = time.monotonic() + MANUAL_AUDIO_REOPEN_DELAY
         # Block future PLAYs until the next session is ready, and
         # kick any remaining RTSP clients (e.g. go2rtc) so they
         # reconnect fresh against a stream that already has video.

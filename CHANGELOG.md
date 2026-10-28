@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.5.4 — 2026-10-28
+
+- Enable MT-6741W manual-view audio using the official app's captured 48-byte
+  entrance peer. Remove the extra HANGUP/ZERO that prevented audio activation.
+- Receive UDP audio on RTPC1 independently of video on RTPC2; announce UDP
+  media readiness after discovery, matching the app's control packets.
+- Connect the RTSP microphone backchannel to the device-owned RTPC channel,
+  matching UDP/TCP transport and replacing the sender when the channel renews.
+- Explicitly hang up manual-view audio when the viewer closes.
+- Complete the app's media-channel END and hangup handshake, stop microphone
+  carriers first and cancel pending answer tasks during teardown.
+- Allow delayed startup media and wait 20 seconds between manual audio sessions
+  on this experimental branch. Rapid reopen failed on the tested MT-6741W;
+  reopen after that interval received video and audio. Stop cancels a queued start.
+- Request the app's 1000-kbps HD setting. Decoding the official app capture
+  still shows 640x240; 1024x608 is a requested ceiling, not verified output.
+- Add capture-based signaling, UDP audio routing and backchannel regressions.
+
 ## 1.5.3 — 2026-10-28
 
 - Fix MT-6741W outbound keepalive ACKs: use the call's own counter rather than

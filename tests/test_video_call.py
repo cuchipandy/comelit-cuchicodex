@@ -33,6 +33,7 @@ def test_maximum_profile_encodes_the_comelit_app_resolution_bounds(inbound):
     session = VideoCallSession(MagicMock(), MagicMock(), video_quality="high")
     payload = session._encode_video_config("SB0000061", "SB100001", 0x1234, 1, inbound=inbound)
     assert struct.unpack_from("<HHHHH", payload, 24) == (1024, 608, 1024, 608, 25)
+    assert struct.unpack_from("<I", payload, 20)[0] == 1000
 
 
 def test_unknown_video_profile_is_rejected_before_network_setup():
@@ -1111,9 +1112,8 @@ class TestCtppMonitorLoopRarePaths:
 class TestSendAnswerSequence:
     """Tests for _send_answer_sequence — single 0x1840/0x0070 peer/accept message.
 
-    Live device test confirmed: sending more messages (video_reconfig, config_ack)
-    does not trigger audio on HA-initiated calls. Device only sends PCMA during
-    inbound calls triggered by a visitor pressing the doorbell.
+    Manual-view audio uses the app's extended 48-byte peer, addressed to
+    the entrance. No inbound call-accepted message is required.
     """
 
     @staticmethod
@@ -1122,6 +1122,7 @@ class TestSendAnswerSequence:
         session._video_quality = "compatible"
         session._ctpp_lock = asyncio.Lock()
         session._call_counter = initial_counter
+        session._rtp_receiver = None
         return session
 
     @pytest.mark.asyncio

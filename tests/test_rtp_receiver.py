@@ -730,8 +730,8 @@ class TestStartControl:
         assert receiver._running is True
 
     @pytest.mark.asyncio
-    async def test_start_control_sends_two_discovery_packets(self):
-        """start_control() sends exactly 2 control packets on startup."""
+    async def test_start_control_sends_discovery_and_media_ready_packets(self):
+        """Both discovery probes and media readiness precede video setup."""
         receiver = RtpReceiver("127.0.0.1", control_req_id=1, udpm_token=0x0000)
 
         mock_transport = MagicMock()
@@ -745,7 +745,8 @@ class TestStartControl:
         ):
             await receiver.start_control()
 
-        assert len(sendto_calls) == 2
+        assert len(sendto_calls) == 3
+        assert [packet[12] for packet in sendto_calls] == [0, 0, 1]
 
 
 class TestSendControlNoTransport:

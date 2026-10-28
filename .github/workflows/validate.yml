@@ -73,6 +73,7 @@ jobs:
         run: |
           PYTHONPATH=. pytest \
             tests/test_protocol.py \
+            tests/test_mt6741w_capture.py \
             tests/test_client.py \
             tests/test_rtp_receiver.py \
             tests/test_rtsp_server.py \

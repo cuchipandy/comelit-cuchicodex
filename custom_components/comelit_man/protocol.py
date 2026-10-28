@@ -135,6 +135,14 @@ def encode_channel_close(sequence: int, server_channel_id: int = 0) -> bytes:
     return encode_header(len(body), server_channel_id) + bytes(body)
 
 
+def encode_media_end(server_channel_id: int, *, response: bool = False) -> bytes:
+    """Close a media/control channel using the app's request-id-zero END format."""
+    body = struct.pack("<HHIH", MessageType.END, 4 if response else 3, 4 if response else 2, server_channel_id)
+    if response:
+        body += b"\x00\x00"
+    return encode_header(len(body), 0) + body
+
+
 def parse_command_response(body: bytes) -> tuple[int, int, int]:
     """Parse a COMMAND response body.
 
@@ -339,6 +347,32 @@ def encode_call_ack(caller: str, callee: str, timestamp: int, codec_param: int =
     )
 
 
+def encode_video_stop(caller: str, callee: str, rtpc2_req_id: int, timestamp: int) -> bytes:
+    """Clear video parameters during the captured manual-view hangup sequence."""
+    return _build_ctpp_video_msg(
+        prefix=0x1840,
+        timestamp=timestamp,
+        action=ACTION_VIDEO_CONFIG,
+        flags=0x0011,
+        caller=caller,
+        callee=callee,
+        extra=b"\x94\x02\x00\x00\x00\x00" + struct.pack("<H", rtpc2_req_id) + bytes(18),
+    )
+
+
+def encode_call_end(caller: str, callee: str, timestamp: int) -> bytes:
+    """End manual viewing/audio using the MT-6741W app's captured hangup."""
+    return _build_ctpp_video_msg(
+        prefix=0x1840,
+        timestamp=timestamp,
+        action=0x0003,
+        flags=0x000E,
+        caller=caller,
+        callee=callee,
+        extra=b"\x00\x00",
+    )
+
+
 def encode_rtpc_link(caller: str, callee: str, rtpc_req_id: int, timestamp: int, refresh: bool = False) -> bytes:
     """Encode RTPC link message (4018 prefix, action 0x000A).
 
@@ -373,6 +407,7 @@ def encode_video_config(
     fps: int = VIDEO_FPS,
     secondary_width: int = 320,
     secondary_height: int = 240,
+    bitrate_kbps: int = 192,
 ) -> bytes:
     """Encode video config trigger (4018 prefix, action 0x001A).
 
@@ -383,7 +418,7 @@ def encode_video_config(
     extra = bytearray()
     extra += bytes([0x14, 0x32, 0x00, 0x00, 0x00, 0x00])
     extra += struct.pack("<H", rtpc2_req_id)
-    extra += bytes([0xFF, 0xFF, 0xC0, 0x00, 0x00, 0x00])  # PCAP2: extra[10:14]=c0 00 00 00
+    extra += b"\xff\xff" + struct.pack("<I", bitrate_kbps)
     extra += struct.pack("<H", width)
     extra += struct.pack("<H", height)
     # Captured legacy calls use 320x240. The app's HD profile sets both
@@ -427,6 +462,7 @@ def encode_answer_peer(
     timestamp: int,
     renewal: bool = False,
     inbound: bool = False,
+    extended: bool = False,
 ) -> bytes:
     """Encode peer/accept message (action 0x70).
 
@@ -435,7 +471,9 @@ def encode_answer_peer(
       [caller\\0] [flag 0x01 0x00] [0x0000 if inbound] [0xFFFFFFFF]
       [caller\\0] [callee\\0\\0]
 
-    Outbound: callee=entrance_addr, no extra padding before separator.
+    Legacy outbound: callee=entrance_addr, no extra padding before separator.
+    MT-6741W manual-view audio: callee=entrance_addr, extended=True adds
+    the same two padding bytes as inbound (2026-10-28 app capture).
     Inbound:  callee=our_base_addr, extra 0x0000 padding before separator.
     Both formats include caller after the separator.
 
@@ -451,7 +489,7 @@ def encode_answer_peer(
     buf += struct.pack(">H", 2 + len(inner_payload))  # inner_len = action(2) + payload
     buf += struct.pack(">H", ACTION_PEER)  # 0x0070
     buf += inner_payload
-    if inbound:
+    if inbound or extended:
         buf += b"\x00\x00"  # extra padding before separator (PCAP2-verified)
     buf += b"\xff\xff\xff\xff"
     buf += _null_terminated(caller)
