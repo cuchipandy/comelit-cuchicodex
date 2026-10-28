@@ -7,6 +7,7 @@ import contextlib
 import logging
 import socket
 import struct
+import time
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -43,7 +44,7 @@ class IconaBridgeClient:
         self.port = port
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
-        self._request_id = 8000 + int(asyncio.get_event_loop().time() * 10) % 1000
+        self._request_id = 8000 + int(time.monotonic() * 10) % 1000
         self._sequence = 0
         self._channels: dict[str, Channel] = {}
         self._receive_task: asyncio.Task[None] | None = None

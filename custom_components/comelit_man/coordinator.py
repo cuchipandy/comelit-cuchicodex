@@ -25,7 +25,7 @@ from .auth import authenticate
 from .channels import ChannelType
 from .client import IconaBridgeClient
 from .config_reader import get_device_config
-from .const import CONF_ENABLE_NOTIFICATIONS, DOMAIN
+from .const import CONF_ENABLE_NOTIFICATIONS, CONF_VIDEO_QUALITY, DEFAULT_VIDEO_QUALITY, DOMAIN
 from .ctpp import _CTR_INCR_BOTH, ctpp_init_sequence
 from .door import open_door
 from .exceptions import AuthenticationError, DoorOpenError
@@ -445,6 +445,7 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
                 self._client,
                 self._config,
                 auto_timeout=auto_timeout,
+                video_quality=self.config_entry.options.get(CONF_VIDEO_QUALITY, DEFAULT_VIDEO_QUALITY),
                 rtsp_server=self._rtsp_server,
                 on_call_end=self._on_video_call_end,
                 on_timeout=self._on_video_call_end,
@@ -630,6 +631,7 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
                 self._client,
                 self._config,
                 auto_timeout=True,
+                video_quality=self.config_entry.options.get(CONF_VIDEO_QUALITY, DEFAULT_VIDEO_QUALITY),
                 rtsp_server=self._rtsp_server,
                 on_call_end=self._on_video_call_end,
                 on_timeout=self._on_video_call_end,

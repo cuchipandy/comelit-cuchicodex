@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.5.2 — 2026-10-28
+
+- Add configurable video quality, including MT-6741W app parameters 1024x608 at
+  25 fps, applied to inbound/outbound setup and renewals. Compatible stays default.
+- Fix microphone capture/answer and reconnect races; restrict card audio to G.711,
+  enable echo/noise suppression and distinguish permission errors from HTTPS errors.
+- Release late microphone tracks/signaling subscriptions after dismissal. Report
+  device audio-channel timeouts instead of silently marking the answer successful.
+- Strip RTP padding from talk-back audio and reject invalid RTP versions.
+- Add received video dimensions and audio packet counters to diagnostics.
+- Add frontend regression tests to CI and signaling/padding regression tests.
+- Use a monotonic clock to initialize client request IDs without an event loop.
+
+Hardware validation on the user's MT-6741W remains pending; requesting a
+resolution does not confirm what a particular panel/firmware will deliver.
+
+
 ## 1.5.1
 
 ### Bug fixes

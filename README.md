@@ -66,9 +66,43 @@ After setup, you can configure the integration via **Settings → Integrations �
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| Video quality | Compatible | Select Compatible, 800x480 for all calls, or Maximum (1024x608 at 25 fps). |
 | Enable notifications | On | Receive doorbell ring and door events. Disable if you only need video and door control, or to troubleshoot the notification connection. |
 
 Changing this setting reloads the integration automatically.
+
+### Maximum video quality and two-way audio (MT-6741W)
+
+Choose **Configure → Video quality → Maximum (1024x608, 25 fps)** to request
+these native stream parameters. They are based on the Comelit app settings
+reported for the MT-6741W; hardware validation is still required. The profile
+is used for incoming calls, manual viewing and call renewals. Both resolution fields are set to 1024x608, matching the app screenshot.
+Legacy profiles retain the captured secondary 320x240 fields. H.264 is relayed without upscaling or
+transcoding, with a maximum 1400-byte payload when the RTSP server packetizes
+NAL units. In pass-through mode the original device packet boundaries are kept;
+the reported app/device limit is also 1400 bytes. Compatible remains the default
+(800x480 outbound, 320x240 inbound, 16 fps). If Maximum produces no picture,
+select Compatible again.
+
+For talking back, use **comelit-doorbell-card**, configure `answer_entity`,
+open Home Assistant over **HTTPS** (local TLS or a remote HTTPS URL), and allow
+microphone access. Press **Answer** during an incoming doorbell call. The card
+negotiates G.711 audio, enables the microphone when answered, and restores it
+on reconnection. A permission refusal now has its own message. HTTP still allows
+video and listening, but browser microphone capture requires a secure origin.
+Manual outbound viewing does not guarantee entrance audio on every firmware.
+
+Download the integration diagnostics while the call is active to compare
+`requested_quality` with `received_dimensions`. The latter is measured from
+decoded frames, not copied from the requested profile. Check `audio_rx_packets`
+(entrance audio), `mic_rx_packets` (go2rtc → integration), and `mic_tx_frames`
+(integration → entrance). Increasing counters verify packet flow; confirm
+intelligible sound in both directions with someone at the entrance. Check
+mute/unmute and repeat after 30 seconds to cover call renewal.
+
+Developer checks: `node --test tests/test_doorbell_card.cjs` covers permission,
+answer timing, reconnection, cancellation and codec selection. Run the Python
+suite for signaling, RTP, RTSP and integration regressions.
 
 ## Known limitations
 

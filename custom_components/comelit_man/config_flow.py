@@ -15,7 +15,17 @@ if TYPE_CHECKING:
 
 from .auth import authenticate
 from .client import IconaBridgeClient
-from .const import CONF_CREATE_USER, CONF_ENABLE_NOTIFICATIONS, CONF_HTTP_PORT, DEFAULT_HTTP_PORT, DEFAULT_PORT, DOMAIN
+from .const import (
+    CONF_CREATE_USER,
+    CONF_ENABLE_NOTIFICATIONS,
+    CONF_HTTP_PORT,
+    CONF_VIDEO_QUALITY,
+    DEFAULT_HTTP_PORT,
+    DEFAULT_PORT,
+    DEFAULT_VIDEO_QUALITY,
+    DOMAIN,
+    VIDEO_QUALITY_PROFILES,
+)
 from .exceptions import (
     AuthenticationError,
 )
@@ -337,5 +347,13 @@ class ComelitLocalOptionsFlow(config_entries.OptionsFlowWithReload):
         current = self._config_entry.options.get(CONF_ENABLE_NOTIFICATIONS, True)
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema({vol.Required(CONF_ENABLE_NOTIFICATIONS, default=current): bool}),
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_ENABLE_NOTIFICATIONS, default=current): bool,
+                    vol.Required(
+                        CONF_VIDEO_QUALITY,
+                        default=self._config_entry.options.get(CONF_VIDEO_QUALITY, DEFAULT_VIDEO_QUALITY),
+                    ): vol.In(VIDEO_QUALITY_PROFILES),
+                }
+            ),
         )

@@ -672,7 +672,7 @@ class LocalRtspServer:
         PCMA only, and go2rtc may deliver PCMU (PT 0) depending on what the
         browser negotiated — µ-law bytes played as A-law sound like static.
         """
-        if len(rtp) < 12:
+        if len(rtp) < 12 or rtp[0] >> 6 != 2:
             return
         cc = rtp[0] & 0x0F
         has_ext = (rtp[0] >> 4) & 0x01
@@ -685,7 +685,13 @@ class LocalRtspServer:
                 return
             ext_words = (rtp[offset + 2] << 8) | rtp[offset + 3]
             offset += 4 + 4 * ext_words
-        payload = rtp[offset:]
+        end = len(rtp)
+        if rtp[0] & 0x20:  # RTP padding is not audio.
+            padding = rtp[-1]
+            if padding == 0 or padding > end - offset:
+                return
+            end -= padding
+        payload = rtp[offset:end]
         if not payload:
             return
         if pt == 0:

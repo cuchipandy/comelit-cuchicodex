@@ -5,6 +5,16 @@ on:
   pull_request:
 
 jobs:
+  frontend:
+    name: Doorbell card audio tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - run: node --test tests/test_doorbell_card.cjs
+
   hacs:
     name: HACS Validation
     runs-on: ubuntu-latest

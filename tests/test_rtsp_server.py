@@ -2413,3 +2413,22 @@ class TestClientCount:
         assert server.client_count == 0
         server._active_clients.append(_TcpClient(writer=MagicMock()))
         assert server.client_count == 1
+
+
+@pytest.mark.parametrize("pt", [0, 8])
+def test_backchannel_strips_rtp_padding_and_extensions(pt):
+    """Headers and padding must never play as noise on the entrance speaker."""
+    server = LocalRtspServer()
+    header = struct.pack("!BBHII", 0xB1, pt, 1, 160, 42)
+    csrc = struct.pack("!I", 99)
+    extension = struct.pack("!HHI", 0xBEDE, 1, 0)
+    payload = (b"\xff" if pt == 0 else b"\xd5") * 160
+    server._on_backchannel_rtp(header + csrc + extension + payload + b"\x00\x00\x00\x04")
+    assert server.backchannel_queue.get_nowait() == b"\xd5" * 160
+
+
+@pytest.mark.parametrize("header,payload", [(0xA0, b"\xd5\x00"), (0xA0, b"\xd5\xff"), (0x40, b"\xd5")])
+def test_backchannel_rejects_invalid_padding_and_version(header, payload):
+    server = LocalRtspServer()
+    server._on_backchannel_rtp(struct.pack("!BBHII", header, 8, 1, 160, 42) + payload)
+    assert server.backchannel_queue.empty()

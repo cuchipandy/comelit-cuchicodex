@@ -6,6 +6,15 @@ MODEL = "6701W"
 
 CONF_HTTP_PORT = "http_port"
 CONF_ENABLE_NOTIFICATIONS = "enable_notifications"
+CONF_VIDEO_QUALITY = "video_quality"
+DEFAULT_VIDEO_QUALITY = "compatible"
+# Requested device resolutions; actual output depends on the panel/firmware.
+# Compatible preserves the captured 800x480 outbound / 320x240 inbound flow.
+VIDEO_QUALITY_PROFILES = {
+    "compatible": "Compatible (800x480 / inbound 320x240)",
+    "480p": "800x480 (all calls)",
+    "high": "Maximum (1024x608, 25 fps)",
+}
 # Opt-in: create a dedicated device user instead of reusing an existing token.
 CONF_CREATE_USER = "create_dedicated_user"
 

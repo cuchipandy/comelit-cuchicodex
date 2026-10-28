@@ -371,12 +371,14 @@ def encode_video_config(
     width: int = VIDEO_WIDTH,
     height: int = VIDEO_HEIGHT,
     fps: int = VIDEO_FPS,
+    secondary_width: int = 320,
+    secondary_height: int = 240,
 ) -> bytes:
     """Encode video config trigger (4018 prefix, action 0x001A).
 
     This is the final message that triggers the device to start UDP video.
     Extra: [0x14 0x32] [4 zeros] [rtpc2_req_id LE16] [0xFFFF] [4 zeros]
-           [width LE16] [height LE16] [width/2 LE16] [height/2 LE16] [fps LE16] [2 zeros]
+           [width LE16] [height LE16] [secondary_width LE16] [secondary_height LE16] [fps LE16] [2 zeros]
     """
     extra = bytearray()
     extra += bytes([0x14, 0x32, 0x00, 0x00, 0x00, 0x00])
@@ -384,9 +386,10 @@ def encode_video_config(
     extra += bytes([0xFF, 0xFF, 0xC0, 0x00, 0x00, 0x00])  # PCAP2: extra[10:14]=c0 00 00 00
     extra += struct.pack("<H", width)
     extra += struct.pack("<H", height)
-    # PCAP shows 320x240 as the secondary resolution (not width//2)
-    extra += struct.pack("<H", 320)
-    extra += struct.pack("<H", 240)
+    # Captured legacy calls use 320x240. The app's HD profile sets both
+    # advertised resolution bounds to 1024x608 (MT-6741W screenshot).
+    extra += struct.pack("<H", secondary_width)
+    extra += struct.pack("<H", secondary_height)
     extra += struct.pack("<H", fps)
     extra += bytes([0x00, 0x00])
     return _build_ctpp_video_msg(

@@ -119,6 +119,7 @@ class RtpReceiver:
 
         # Latest decoded JPEG frame
         self._latest_frame: bytes | None = None
+        self.video_dimensions: tuple[int, int] | None = None
         self._frame_event = asyncio.Event()
 
         self._running = False
@@ -620,6 +621,7 @@ class RtpReceiver:
                         )
                         for w, h, jpeg_data in decoded:
                             frame_count += 1
+                            self.video_dimensions = (w, h)
                             self._latest_frame = jpeg_data
                             self._frame_event.set()
                             if verbose and (frame_count <= 5 or frame_count % 50 == 0):
@@ -725,6 +727,7 @@ class RtpReceiver:
         self._protocol = None
 
         self._latest_frame = None
+        self.video_dimensions = None
         _LOGGER.debug(
             "RTP receiver stopped (received %d media packets)",
             self._media_packet_count,

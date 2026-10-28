@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 from .channels import Channel, ChannelType
 from .client import IconaBridgeClient
-from .const import DOMAIN
+from .const import DEFAULT_VIDEO_QUALITY, DOMAIN, VIDEO_QUALITY_PROFILES
 from .ctpp import ctpp_init_sequence
 from .exceptions import VideoCallError
 from .models import DeviceConfig
@@ -91,7 +91,11 @@ class VideoCallSession:
         on_call_end: Callable[[], None] | None = None,
         on_timeout: Callable[[], None] | None = None,
         on_ring: Callable[[str, int], None] | None = None,
+        video_quality: str = DEFAULT_VIDEO_QUALITY,
     ) -> None:
+        if video_quality not in VIDEO_QUALITY_PROFILES:
+            raise ValueError(f"Unknown video quality: {video_quality}")
+        self._video_quality = video_quality
         self._client = client
         self._config = config
         self._auto_timeout = auto_timeout
@@ -140,6 +144,33 @@ class VideoCallSession:
     def rtsp_server(self) -> LocalRtspServer | None:
         """Return the RTSP server for go2rtc stream_source."""
         return self._rtsp_server
+
+    def _video_dimensions(self, *, inbound: bool = False) -> tuple[int, int]:
+        """Return the requested size, preserving legacy inbound signaling."""
+        if self._video_quality == "high":
+            return (1024, 608)
+        if inbound and self._video_quality == "compatible":
+            return (320, 240)
+        return (800, 480)
+
+    def _encode_video_config(
+        self, caller: str, callee: str, media_req_id: int, counter: int, *, inbound: bool = False
+    ) -> bytes:
+        """Use the same selected resolution on setup, retransmit and renewal."""
+        width, height = self._video_dimensions(inbound=inbound)
+        fps = 25 if self._video_quality == "high" else 16
+        secondary_width, secondary_height = (width, height) if self._video_quality == "high" else (320, 240)
+        return encode_video_config(
+            caller,
+            callee,
+            media_req_id,
+            counter,
+            width=width,
+            height=height,
+            fps=fps,
+            secondary_width=secondary_width,
+            secondary_height=secondary_height,
+        )
 
     def _ts(self) -> int:
         """Return current timestamp for CTPP messages."""
@@ -426,7 +457,7 @@ class VideoCallSession:
             # first, the device doesn't enter the correct state for HANGUP/ZERO recovery.
             # PCAP: call_counter +0x00010000 (byte[4] +1) for video config DATA message.
             call_counter += _CTR_INCR_BYTE4
-            vid_config = encode_video_config(our_addr, entrance_addr, media_req_id, call_counter)
+            vid_config = self._encode_video_config(our_addr, entrance_addr, media_req_id, call_counter)
             await client.send_binary(ctpp, vid_config)
             _LOGGER.debug("Sent video config (before device RTPC), our_counter=0x%08X", call_counter)
 
@@ -843,7 +874,7 @@ class VideoCallSession:
         call_counter += _CTR_INCR_BYTE4
         await client.send_binary(
             ctpp,
-            encode_video_config(our_addr, entrance_addr, media_req_id, call_counter),
+            self._encode_video_config(our_addr, entrance_addr, media_req_id, call_counter),
         )
 
         # 6. Wait for device RTPC and ACK its link
@@ -1071,15 +1102,15 @@ class VideoCallSession:
                 ctpp, encode_rtpc_link(our_addr, our_base_addr, rtpc1.server_channel_id, call_counter)
             )
 
-            # Steps 11-12: Video config (320x240 for inbound, PCAP2-verified) + 3s retransmit
+            # Steps 11-12: Selected video profile + 3s retransmit.
             call_counter = (call_counter + _CTR_INCR_BYTE4) & 0xFFFFFFFF
-            vid_cfg = encode_video_config(our_addr, our_base_addr, media_req_id, call_counter, width=320, height=240)
+            vid_cfg = self._encode_video_config(our_addr, our_base_addr, media_req_id, call_counter, inbound=True)
             await client.send_binary(ctpp, vid_cfg)
             await asyncio.sleep(3.0)
             call_counter = (call_counter + _CTR_INCR_BYTE4) & 0xFFFFFFFF
             await client.send_binary(
                 ctpp,
-                encode_video_config(our_addr, our_base_addr, media_req_id, call_counter, width=320, height=240),
+                self._encode_video_config(our_addr, our_base_addr, media_req_id, call_counter, inbound=True),
             )
             await asyncio.sleep(0.4)
 
@@ -1196,6 +1227,10 @@ class VideoCallSession:
                 _LOGGER.debug("Answer: device RTPC=0x%04X", self._device_rtpc_req_id)
             except TimeoutError:
                 _LOGGER.warning("answer_inbound: device RTPC not opened within timeout — audio unavailable")
+                raise VideoCallError(
+                    translation_domain=DOMAIN,
+                    translation_key="video_call_failed",
+                ) from None
 
         if self._rtp_receiver and self._device_rtpc_req_id:
             # TCP TX path for TCP-media sessions: frames go out on the
