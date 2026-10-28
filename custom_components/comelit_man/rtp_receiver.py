@@ -120,6 +120,8 @@ class RtpReceiver:
         # Latest decoded JPEG frame
         self._latest_frame: bytes | None = None
         self.video_dimensions: tuple[int, int] | None = None
+        self.last_video_packet_at: float | None = None
+        self.video_packet_count = 0
         self._frame_event = asyncio.Event()
 
         self._running = False
@@ -411,6 +413,9 @@ class RtpReceiver:
             # G.711 audio: PT 0 = PCMU (μ-law), PT 8 = PCMA (A-law)
             self._process_audio_rtp(rtp, payload_type)
             return
+
+        self.last_video_packet_at = time.monotonic()
+        self.video_packet_count += 1
 
         # RTP pass-through: forward raw video RTP to the RTSP server
         # immediately — no NAL reassembly delay.

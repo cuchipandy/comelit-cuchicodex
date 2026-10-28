@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from homeassistant.components.diagnostics import async_redact_data
@@ -40,6 +41,12 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Comelit
         "video": {
             "requested_quality": entry.options.get(CONF_VIDEO_QUALITY, DEFAULT_VIDEO_QUALITY),
             "received_dimensions": receiver.video_dimensions if receiver else None,
+            "video_rx_packets": receiver.video_packet_count if receiver else 0,
+            "last_video_packet_age_s": (
+                round(time.monotonic() - receiver.last_video_packet_at, 2)
+                if receiver and receiver.last_video_packet_at is not None
+                else None
+            ),
             "audio_rx_packets": receiver._audio_packet_count if receiver else 0,
             "mic_rx_packets": rtsp.backchannel_rx_count if rtsp else 0,
             "mic_tx_frames": receiver.audio_tx_real_count if receiver else 0,

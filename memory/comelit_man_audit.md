@@ -8,6 +8,8 @@
 
 **2026-10-28 scoped development note (v1.5.2):** added configurable MT-6741W video parameters, microphone lifecycle/codec fixes, RTP padding handling and media diagnostics. The full-sweep tier verdict below remains the historical v1.5.0 audit, not a new certification of these changes. Automated regression results are recorded in the feature PR; live MT-6741W validation is pending.
 
+**2026-10-28 MT-6741W follow-up (v1.5.3):** outbound call-counter ACKs and multiple media-lease renewals live-tested on the user device. RTSP test client remained connected for 100 seconds; a brief picture pause remains during panel renegotiation. Registration timestamps now return to the coordinator when video renews. Native 1024x608 and manual-view audio are not achieved on this device yet; observed output was 640x240 at about 25 fps and no audio RTP. Historical tier certification below is unchanged.
+
 **Version at audit:** 1.5.0
 **Tier claim (CLAUDE.md):** Bronze MET; Silver MET; Gold NOT MET (2 docs FAIL + 1 PARTIAL, user-deferred); Platinum MET
 **Tier verdict (audited):** **Bronze MET** (16 PASS / 2 N/A — brands now PASS); **Silver MET** (9 PASS / 1 N/A; coverage 100%); **Gold NOT MET** (16 PASS / 2 FAIL / 1 PARTIAL / 2 N/A — see BL-039/BL-040, user-deferred 2026-08-28); **Platinum MET** (3 PASS); Beyond A-D 13/14 PASS (B still PARTIAL: `video_call.py:521` bare `asyncio.create_task  # noqa: RUF006`); Beyond E 8 PASS / 14 N/A; Beyond F 4 PASS / 1 accepted-FAIL; Beyond G 4 PASS / 1 N/A; Beyond H 2 PASS (spot-checked 2026-08-28, not fully re-swept)

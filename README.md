@@ -75,7 +75,9 @@ Changing this setting reloads the integration automatically.
 
 Choose **Configure → Video quality → Maximum (1024x608, 25 fps)** to request
 these native stream parameters. They are based on the Comelit app settings
-reported for the MT-6741W; hardware validation is still required. The profile
+reported for the MT-6741W. Live testing on one MT-6741W on 2026-10-28
+received **640x240 at approximately 25 fps**, not 1024x608. The requested
+profile is not a guarantee of native camera resolution. The profile
 is used for incoming calls, manual viewing and call renewals. Both resolution fields are set to 1024x608, matching the app screenshot.
 Legacy profiles retain the captured secondary 320x240 fields. H.264 is relayed without upscaling or
 transcoding, with a maximum 1400-byte payload when the RTSP server packetizes
@@ -90,7 +92,10 @@ microphone access. Press **Answer** during an incoming doorbell call. The card
 negotiates G.711 audio, enables the microphone when answered, and restores it
 on reconnection. A permission refusal now has its own message. HTTP still allows
 video and listening, but browser microphone capture requires a secure origin.
-Manual outbound viewing does not guarantee entrance audio on every firmware.
+**MT-6741W self-view audio remains unresolved:** manual viewing on the tested
+monitor delivered zero audio RTP packets, even after the known answer sequences
+and TCP/UDP audio carrier tests. The app has separate audio controls; do not
+interpret the presence of an RTSP audio track as proof of entrance audio.
 
 Download the integration diagnostics while the call is active to compare
 `requested_quality` with `received_dimensions`. The latter is measured from
@@ -99,6 +104,10 @@ decoded frames, not copied from the requested profile. Check `audio_rx_packets`
 (integration → entrance). Increasing counters verify packet flow; confirm
 intelligible sound in both directions with someone at the entrance. Check
 mute/unmute and repeat after 30 seconds to cover call renewal.
+`video_rx_packets` and `last_video_packet_age_s` distinguish fresh video from
+a stale last JPEG. The integration restarts a silent media session after
+8 seconds when the device supplies no CALL_END. During normal renewal, RTSP
+silence keeps go2rtc connected while video signaling runs.
 
 Developer checks: `node --test tests/test_doorbell_card.cjs` covers permission,
 answer timing, reconnection, cancellation and codec selection. Run the Python

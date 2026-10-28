@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.5.3 — 2026-10-28
+
+- Fix MT-6741W outbound keepalive ACKs: use the call's own counter rather than
+  the inbound timestamp transform. Verified for 95 seconds and two renewals.
+- Keep the latest counter when renewing a call; retain the inbound ACK transform.
+- Acknowledge registration renewals separately from call counters and hand the
+  refreshed registration timestamp back to the doorbell listener after video.
+- Route outbound TCP media from both RTPC tracks; maintain RTSP silence during
+  lease negotiation so go2rtc does not disconnect for lack of packets.
+- Recover video that stalls without CALL_END; expose packet count and age in
+  diagnostics instead of relying on an old decoded frame.
+- Record the measured limit on the tested MT-6741W: maximum profile received
+  640x240 at about 25 fps. 1024x608 and manual-view audio remain unverified/unresolved.
+
+
 ## 1.5.2 — 2026-10-28
 
 - Add configurable video quality, including MT-6741W app parameters 1024x608 at

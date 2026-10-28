@@ -446,6 +446,8 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
                 self._config,
                 auto_timeout=auto_timeout,
                 video_quality=self.config_entry.options.get(CONF_VIDEO_QUALITY, DEFAULT_VIDEO_QUALITY),
+                registration_ack_ts=(self._ctpp_init_ts + _CTR_INCR_BOTH) & 0xFFFFFFFF if self._ctpp_init_ts else 0,
+                on_ctpp_init=self._remember_ctpp_init,
                 rtsp_server=self._rtsp_server,
                 on_call_end=self._on_video_call_end,
                 on_timeout=self._on_video_call_end,
@@ -482,6 +484,10 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
             except Exception:
                 await self._ensure_vip_listener()
                 raise
+
+    def _remember_ctpp_init(self, timestamp: int) -> None:
+        """Retain the registration timestamp for the listener after video stops."""
+        self._ctpp_init_ts = timestamp
 
     def _on_video_call_end(self) -> None:
         """Called by VideoCallSession when the device sends CALL_END."""
@@ -632,6 +638,8 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
                 self._config,
                 auto_timeout=True,
                 video_quality=self.config_entry.options.get(CONF_VIDEO_QUALITY, DEFAULT_VIDEO_QUALITY),
+                registration_ack_ts=(self._ctpp_init_ts + _CTR_INCR_BOTH) & 0xFFFFFFFF if self._ctpp_init_ts else 0,
+                on_ctpp_init=self._remember_ctpp_init,
                 rtsp_server=self._rtsp_server,
                 on_call_end=self._on_video_call_end,
                 on_timeout=self._on_video_call_end,

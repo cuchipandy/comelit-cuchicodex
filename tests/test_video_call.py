@@ -40,6 +40,81 @@ def test_unknown_video_profile_is_rejected_before_network_setup():
         VideoCallSession(MagicMock(), MagicMock(), video_quality="unsupported")
 
 
+async def test_mt6741w_outbound_keepalive_preserves_call_session_id():
+    """Captured MT-6741W event must ACK with our counter, not the inbound transform."""
+    client = MagicMock()
+    session = VideoCallSession(client, MagicMock())
+    session._active = True
+    session._call_counter = 0x6DE6BC40
+    keepalive = bytes.fromhex("40 18 40 bc 6d e5 00 00 ff ff ff ff")
+    end = bytes.fromhex("40 18 40 bc 6d e5 00 03 00 0e")
+    client.read_response = AsyncMock(side_effect=[keepalive, end])
+    client.send_binary = AsyncMock()
+
+    async def renew(*args, **kwargs):
+        session._active = False
+        return args[-1]
+
+    session._inline_reestablish = AsyncMock(side_effect=renew)
+    await session._ctpp_monitor_loop(client, MagicMock(), "SB0000042", "SB100001", 0x6DE6BC40, 1, 2)
+    ack = client.send_binary.call_args.args[1]
+    assert ack == bytes.fromhex(
+        "00 18 40 bc e7 6d 00 00 ff ff ff ff 53 42 30 30 30 30 30 34 32 00 53 42 31 30 30 30 30 31 00 00"
+    )
+    # Renewal receives the updated counter and uses the outbound ACK regime.
+    assert session._inline_reestablish.call_args.args[-1] == 0x6DE7BC40
+    assert session._inline_reestablish.call_args.kwargs["call_end_ts"] == 0
+
+
+def test_monitor_outbound_counter_wraps_without_changing_session_bytes():
+    session = VideoCallSession(MagicMock(), MagicMock())
+    session._call_counter = 0xFFFFBC40
+    assert session._monitor_ack_timestamp(b"\x40\x18" + b"\xff" * 6) == 0x0000BC40
+
+
+async def test_missing_call_end_recovers_a_stale_video_session():
+    """A silent media source must not remain advertised as streaming forever."""
+    from custom_components.comelit_man.rtp_receiver import RtpReceiver
+
+    client = MagicMock()
+    client.read_response = AsyncMock(side_effect=TimeoutError)
+    restart = MagicMock()
+    session = VideoCallSession(client, MagicMock(), on_call_end=restart)
+    session._active = True
+    session._rtp_receiver = RtpReceiver("127.0.0.1")
+    session._rtp_receiver.last_video_packet_at = 10.0
+    with patch("custom_components.comelit_man.video_call.time.monotonic", return_value=20.0):
+        await session._ctpp_monitor_loop(client, MagicMock(), "SB0000042", "SB100001", 0, 1, 2)
+    assert session.active is False
+    restart.assert_called_once_with()
+
+
+async def test_registration_renewal_keeps_its_own_ack_pair_during_video():
+    from custom_components.comelit_man.protocol import encode_call_response_ack
+
+    client = MagicMock()
+    config = MagicMock(apt_address="SB000004")
+    session = VideoCallSession(client, config, registration_ack_ts=0x12345678)
+    session._active = True
+    session._call_counter = 0x6DE6BC40
+    renewal = struct.pack("<HI", 0x1860, 0xDEADBEEF) + b"\x00\x10"
+
+    async def read(channel):
+        if not hasattr(read, "done"):
+            read.done = True
+            return renewal
+        session._active = False
+        raise TimeoutError
+
+    client.read_response = read
+    client.send_binary = AsyncMock()
+    await session._ctpp_monitor_loop(client, MagicMock(), "SB0000042", "SB100001", 0, 1, 2)
+    assert [c.args[1] for c in client.send_binary.call_args_list] == [
+        encode_call_response_ack("SB0000042", "SB000004", 0x12345678, prefix=p) for p in (0x1800, 0x1820)
+    ]
+    assert session._call_counter == 0x6DE6BC40
+
+
 class TestCleanup:
     @pytest.mark.asyncio
     async def test_cleanup_called_even_when_rtp_receiver_stop_raises(self):
@@ -203,6 +278,7 @@ class TestCtppMonitorLoop:
         from custom_components.comelit_man.video_call import _transform_device_ts
 
         session = self._make_session()
+        session._inbound = True
 
         sent_data = []
         DEV_TS = 0x12345678
@@ -429,6 +505,7 @@ class TestCtppMonitorLoop:
         from custom_components.comelit_man.video_call import _transform_device_ts
 
         session = self._make_session()
+        session._inbound = True
         sent_data = []
         DEV_TS = 0xCAFEBABE
 
@@ -591,7 +668,8 @@ class TestInlineReestablish:
         session._external_rtsp = False
         session._ctpp_lock = asyncio.Lock()
         session._call_counter = 0
-        session._rtsp_server = None
+        session._rtsp_server = MagicMock()
+        session._on_ctpp_init = MagicMock()
 
         our_addr = "SB0000061"
         entrance_addr = "SB100001"
@@ -685,6 +763,8 @@ class TestInlineReestablish:
             and struct.unpack_from(">H", d, 6)[0] == 0x001A
         ]
         assert video_config_messages, "No VIDEO_CONFIG message (0x1840) was sent during renewal"
+        assert [c[0] for c in session._rtsp_server.method_calls] == ["mark_not_ready", "reset", "mark_ready"]
+        session._on_ctpp_init.assert_called_once_with(fixed_ts)
         width, height, fps = (1024, 608, 25) if quality == "high" else (800, 480, 16)
         secondary = (width, height) if quality == "high" else (320, 240)
         assert struct.unpack_from("<HHHHH", video_config_messages[0], 24) == (width, height, *secondary, fps)

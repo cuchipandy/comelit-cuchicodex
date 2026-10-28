@@ -10,6 +10,21 @@ import pytest
 from custom_components.comelit_man.coordinator import ComelitLocalCoordinator
 from custom_components.comelit_man.models import Camera, DeviceConfig, Door
 
+
+async def test_video_renewal_hands_registration_timestamp_back_to_listener():
+    coord = _make_coordinator(with_client=True)
+    session = MagicMock()
+    session.start = AsyncMock()
+    session.stop = AsyncMock()
+    coord._ensure_vip_listener = AsyncMock()
+    with patch("custom_components.comelit_man.coordinator.VideoCallSession", return_value=session) as factory:
+        await coord.async_start_video()
+    factory.call_args.kwargs["on_ctpp_init"](0x12345678)
+    await coord.async_stop_video()
+    assert coord._ctpp_init_ts == 0x12345678
+    coord._ensure_vip_listener.assert_awaited_once()
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

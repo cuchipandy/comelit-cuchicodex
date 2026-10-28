@@ -372,9 +372,9 @@ rb[2], rb[3] = rb[3], (rb[2] + 1) & 0xFF
 ack_ts = struct.unpack("<I", bytes(rb))[0]
 ```
 
-Used for every `0x1800` ACK of a `0x18C0` / `0x1840` / `0x1860` event
+Used for inbound event ACKs and inbound answer handoffs
 (`video_call.py:_transform_device_ts`). Caller is `apt_addr+sub`, callee is the
-bare `apt_addr`.
+bare `apt_addr`. Do not generalize this to outbound call keepalives: see below.
 
 **2. Registration renewal ACKs — derive from our own init.**
 
@@ -392,6 +392,13 @@ _CTR_INCR_BYTE4 = 0x00010000   # byte 4 only
 _CTR_INCR_BYTE5 = 0x01000000   # byte 5 only
 _CTR_INCR_BOTH  = 0x01010000   # both
 ```
+
+MT-6741W live validation (2026-10-28): outbound mid-call keepalives require
+`self._call_counter += BYTE4`, preserving the local session ID, and target the
+entrance address. Applying the inbound transform produced five retries of the
+same event and a media stop after about 32 seconds. The local-counter ACK
+allowed CALL_END to arrive and video to resume across two lease renewals in
+a 95-second test. Registration renewal still uses regime 2, not this counter.
 
 Each call-setup message advances the session counter by one of these,
 determined by the step (see `video_call.py`). The call's initial timestamp must
@@ -861,3 +868,24 @@ To undo a provisioned user the page offers `reset-user.html?user=<map>.<slot>`
 - [simllll/hass-comelit-icona](https://github.com/simllll/hass-comelit-icona) — sibling fork; source of the 6742W/6741W observations, the floor-call tag, and the ONVIF backchannel convention
 - [grdw — "My intercom" series](https://grdw.nl/2023/01/28/my-intercom-part-1.html) — early ICONA reverse engineering
 - [madchicken/comelit-client](https://github.com/madchicken/comelit-client) — independent client implementation
+
+### MT-6741W live investigation — 2026-10-28
+
+The app screenshot requests min=max 1024x608, 25 fps and payload 1400. The local
+stream actually decoded as 640x240 at ~25 fps with that profile; 640x480,
+800x480, a 1000-kbps field and apartment-targeted reconfiguration also returned
+640x240. Frames were not flagged interlaced. Do not advertise 1024x608 as verified.
+
+Manual-view audio investigation: TCP RTPC1/RTPC2/device RTPC and UDP were
+inspected. UDP keepalive responses arrived, but no PT0/PT8 audio RTP was seen.
+Tests included the regular outbound peer, the inbound-style peer/accepted
+sequence, codec parameter 0x07, UDP/TCP PCMA carriers, and the apartment-targeted
+self-view sequence documented in Jordi-14's fork. No dedicated audio channel
+opened. These unsuccessful experiments were not enabled in production. A capture
+of the official app's manual listen/talk activation is needed to identify the
+missing negotiation. Screenshots show controls and settings, not wire behavior.
+
+For comparison of related implementations:
+- https://github.com/simllll/hass-comelit-icona/blob/main/custom_components/comelit_intercom/icona/video_call.py
+- https://github.com/Jordi-14/ha-component-comelit-intercom/blob/main/custom_components/comelit_intercom/video/video_call.py
+- The existing feature/add_hd_video_feed branch describes the 1000-kbps HD field.

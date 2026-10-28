@@ -16,6 +16,18 @@ from custom_components.comelit_man.rtp_receiver import (
 )
 
 
+def test_media_freshness_counts_video_and_excludes_audio():
+    receiver = RtpReceiver("127.0.0.1")
+    audio = struct.pack("!BBHII", 0x80, 8, 1, 0, 42) + b"\xd5" * 160
+    video = struct.pack("!BBHII", 0x80, 99, 2, 0, 42) + b"\x65\xab"
+    with patch("custom_components.comelit_man.rtp_receiver.time.monotonic", return_value=100.0):
+        receiver.receive_tcp_rtp(audio)
+        assert receiver.last_video_packet_at is None
+        receiver.receive_tcp_rtp(video)
+        assert receiver.last_video_packet_at == 100.0
+        assert receiver.video_packet_count == 1
+
+
 class TestStartMediaStart:
     @pytest.mark.asyncio
     async def test_start_media_creates_decode_task(self):
