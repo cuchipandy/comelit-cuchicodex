@@ -1749,6 +1749,39 @@ class TestStartInbound:
         await session.stop()
 
     @pytest.mark.asyncio
+    async def test_inbound_udp_audio_reaches_rtsp_on_its_separate_channel(self):
+        """A physical call uses RTPC1 for audio even when video arrives over UDP."""
+        from custom_components.comelit_man.rtp_receiver import RtpReceiver
+
+        config, client, _, rtsp, ctpp = self._make_mocks()
+        session = self._make_session(config, client)
+        receiver = RtpReceiver(client.host, client.port)
+        receiver.start_control = AsyncMock()
+        receiver.start_keepalive = MagicMock()
+        receiver.start_media = AsyncMock()
+        receiver.wait_for_first_video = AsyncMock()
+        ctpp.response_queue.put_nowait(b"\x00\x18" + bytes(10))
+        with (
+            patch("custom_components.comelit_man.video_call.RtpReceiver", return_value=receiver),
+            patch("custom_components.comelit_man.video_call.LocalRtspServer", return_value=rtsp),
+        ):
+            await session.start_inbound("SB100001", 0x12345678)
+        try:
+            audio = bytes(range(160))
+            rtp = struct.pack("!BBHII", 0x80, 8, 1, 160, 1) + audio
+            # RTPC1 gets 0x20; UDPM and RTPC2 get separate channel IDs.
+            packet = struct.pack("<2sHHH", b"\x00\x06", len(rtp), 0x20, 0) + rtp
+            receiver._on_udp_packet(packet)
+            assert receiver._audio_packet_count == 1
+            assert rtsp.audio_queue.get_nowait() == audio
+            assert receiver.video_packet_count == 0
+            unrelated = struct.pack("<2sHHH", b"\x00\x06", len(rtp), 0x9999, 0) + rtp
+            receiver._on_udp_packet(unrelated)
+            assert rtsp.audio_queue.empty()
+        finally:
+            await session.stop()
+
+    @pytest.mark.asyncio
     async def test_start_inbound_stores_inbound_device_rtpc_not_req_id(self):
         """start_inbound saves the device RTPC placeholder on self._inbound_device_rtpc
         but does NOT set _device_rtpc_req_id — that's deferred to answer_inbound()."""

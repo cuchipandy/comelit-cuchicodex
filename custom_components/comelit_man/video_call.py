@@ -1216,6 +1216,9 @@ class VideoCallSession:
                 media_req_id=0,
                 udpm_token=udpm_token,
             )
+            # MT-6741W also sends inbound audio over UDP on RTPC1. Register
+            # its ID separately from RTPC2 so those packets are not discarded.
+            receiver.set_audio_req_id(rtpc1.server_channel_id)
             if self._rtsp_server and self._external_rtsp:
                 self._rtsp_server.reset()
                 rtsp_server = self._rtsp_server
@@ -1318,7 +1321,7 @@ class VideoCallSession:
             # to answer_inbound() — called explicitly when the user presses "Answer".
             # This keeps the call passive (other phones still ring) until the user decides.
 
-            # Start TCP media router — device sends video (RTPC2) + audio (RTPC1) via TCP
+            # Also accept TCP media on RTPC2 (video) and RTPC1 (audio).
             self._tcp_task = asyncio.create_task(self._tcp_inbound_media_router(client, rtpc1, rtpc2, receiver))
             self._call_counter = call_counter
             self._ctpp_task = asyncio.create_task(
@@ -1456,7 +1459,7 @@ class VideoCallSession:
     ) -> None:
         """Route TCP RTP from RTPC1 (audio) and RTPC2 (video) into receiver.
 
-        On inbound calls the device streams both tracks over TCP (not UDP).
+        Both tracks may arrive over TCP; the UDP receiver also accepts them.
         The client strips the ICONA header, so queued data is raw RTP.
         """
         try:
