@@ -837,9 +837,9 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
     async def _ensure_vip_listener(self) -> None:
         """Start VIP listener if enabled and not already running.
 
-        Reuses the init_ts stored from the most recent _open_ctpp_channels
-        call so the restarted listener's outgoing ACKs match the counter
-        state the device already has for this CTPP channel.
+        An open channel can still be in the previous call's state. Register
+        again before returning it to notification duty, and give the new
+        listener the same timestamp used by that registration.
         """
         if not self._config or not self._client:
             return
@@ -855,6 +855,18 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
             ctpp = self._client.get_channel("CTPP")
             if ctpp is None or not ctpp.is_open:
                 await self._open_ctpp_channels(self._client, self._config)
+            else:
+                ts = int(time.time()) & 0xFFFFFFFF
+                await ctpp_init_sequence(
+                    self._client,
+                    ctpp,
+                    self._config.apt_address,
+                    self._config.apt_subaddress,
+                    f"{self._config.apt_address}{self._config.apt_subaddress}",
+                    ts,
+                )
+                self._remember_ctpp_init(ts)
+                _LOGGER.info("VIP registration restored on existing CTPP channel")
             vip = VipEventListener(
                 self._client,
                 self._config,

@@ -1130,6 +1130,42 @@ class TestKeepaliveLoopBody:
 
 
 class TestEnsureVipListener:
+    async def test_open_call_channel_is_registered_before_listening_again(self):
+        coord = _make_coordinator(with_client=True)
+        channel = MagicMock(is_open=True)
+        coord._client.get_channel.return_value = channel
+        coord._ctpp_init_ts = 1
+        listener = MagicMock()
+        listener.start = AsyncMock()
+        registration_complete = False
+
+        async def register(*args):
+            nonlocal registration_complete
+            registration_complete = True
+
+        async def listen():
+            assert registration_complete
+            assert coord._ctpp_init_ts == 1000
+
+        listener.start.side_effect = listen
+        with (
+            patch("custom_components.comelit_man.coordinator.time.time", return_value=1000),
+            patch("custom_components.comelit_man.coordinator.ctpp_init_sequence", side_effect=register) as init,
+            patch("custom_components.comelit_man.coordinator.VipEventListener", return_value=listener) as factory,
+        ):
+            await coord._ensure_vip_listener()
+        init.assert_awaited_once_with(
+            coord._client,
+            channel,
+            coord._config.apt_address,
+            coord._config.apt_subaddress,
+            f"{coord._config.apt_address}{coord._config.apt_subaddress}",
+            1000,
+        )
+        assert factory.call_args.kwargs["init_ts"] == 1000
+        listener.start.assert_awaited_once()
+        coord._client.open_channel.assert_not_awaited()
+
     @pytest.mark.asyncio
     async def test_noop_when_already_running(self):
         coord = _make_coordinator(with_client=True)
