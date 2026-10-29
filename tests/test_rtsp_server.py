@@ -2377,6 +2377,29 @@ class TestTruncatedRtpExtension:
 
 
 class TestBackchannelPcmuConversion:
+    @pytest.mark.parametrize("pt", [0, 8])
+    def test_microphone_gain_doubles_quiet_speech_without_changing_frame_length(self, pt):
+        from custom_components.comelit_man.rtsp_server import _alaw2linear, _ulaw2linear
+
+        # Known G.711 samples: PCMU 0xCE = 988; PCMA 0xFA = 1008.
+        sample = 0xCE if pt == 0 else 0xFA
+        original = _ulaw2linear(sample) if pt == 0 else _alaw2linear(sample)
+        server = LocalRtspServer(microphone_gain=2)
+        server._on_backchannel_rtp(_rtp(pt=pt, payload=bytes([sample]) * 160))
+        amplified = server.backchannel_queue.get_nowait()
+        assert len(amplified) == 160
+        assert abs(_alaw2linear(amplified[0]) - 2 * original) < 100
+
+    def test_gain_preserves_silence_and_saturates_both_polarities(self):
+        from custom_components.comelit_man.rtsp_server import _alaw2linear, _microphone_gain_table
+
+        table = _microphone_gain_table(3)
+        assert table[0xD5] == 0xD5
+        assert table[0x55] == 0x55
+        assert _alaw2linear(table[0xAA]) == 32256
+        assert _alaw2linear(table[0x2A]) == -32256
+        assert _microphone_gain_table(1) == bytes(range(256))
+
     def test_pcmu_payload_converted_to_alaw(self):
         from custom_components.comelit_man.rtsp_server import _ULAW_TO_ALAW
 

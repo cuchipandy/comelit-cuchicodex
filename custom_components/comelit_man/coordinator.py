@@ -25,7 +25,14 @@ from .auth import authenticate
 from .channels import ChannelType
 from .client import IconaBridgeClient
 from .config_reader import get_device_config
-from .const import CONF_ENABLE_NOTIFICATIONS, CONF_VIDEO_QUALITY, DEFAULT_VIDEO_QUALITY, DOMAIN
+from .const import (
+    CONF_ENABLE_NOTIFICATIONS,
+    CONF_MICROPHONE_GAIN,
+    CONF_VIDEO_QUALITY,
+    DEFAULT_MICROPHONE_GAIN,
+    DEFAULT_VIDEO_QUALITY,
+    DOMAIN,
+)
 from .ctpp import _CTR_INCR_BOTH, ctpp_init_sequence
 from .door import open_door
 from .exceptions import AuthenticationError, DoorOpenError
@@ -217,7 +224,9 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
 
         # Start persistent RTSP server so go2rtc can connect immediately
         if not self._rtsp_server:
-            rtsp = LocalRtspServer()
+            rtsp = LocalRtspServer(
+                microphone_gain=float(self.config_entry.options.get(CONF_MICROPHONE_GAIN, DEFAULT_MICROPHONE_GAIN))
+            )
             self._rtsp_url = await rtsp.start()
             self._rtsp_server = rtsp
             _LOGGER.info("Persistent RTSP server started: %s", self._rtsp_url)

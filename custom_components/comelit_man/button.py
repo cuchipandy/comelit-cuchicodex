@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 
@@ -68,30 +67,8 @@ class ComelitDoorButton(ComelitEntity, ButtonEntity):
             _LOGGER.exception("Failed to open door %s", self._door.name)
             return
 
-        if self.coordinator.video_session and self.coordinator.video_session.active:
-            _LOGGER.info("Door opened — stopping video in 10s")
-            # Mark the stop as user-initiated NOW (before the 10s delay, but
-            # after the door-open has been dispatched — the coordinator's
-            # path selection in async_open_door depends on video_session
-            # still being active, so the flag can't be set earlier). This
-            # prevents _on_video_call_end from auto-restarting if the device
-            # ends the call on its own during the delay window.
-            self.coordinator.request_video_stop()
-            self.coordinator.config_entry.async_create_background_task(
-                self.hass, self._stop_video_after_delay(10), "comelit-stop-video-delay"
-            )
-
-    async def _stop_video_after_delay(self, delay: int) -> None:
-        """Stop the video session after a delay (seconds).
-
-        The video-stopped flag is set up front in async_press so a device
-        CALL_END arriving during the delay window is ignored by the
-        coordinator's restart callback.
-        """
-        await asyncio.sleep(delay)
-        if self.coordinator.video_session and self.coordinator.video_session.active:
-            _LOGGER.info("Stopping video after door-open delay")
-            await self.coordinator.async_stop_video()
+        # Releasing the door is not a hangup. Some panels stop media when the
+        # relay activates; keep recovery enabled while the caller is watching.
 
 
 class ComelitStartVideoButton(ComelitEntity, ButtonEntity):

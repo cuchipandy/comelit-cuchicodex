@@ -57,11 +57,13 @@
         "title": "Comelit Intercom Options",
         "data": {
           "enable_notifications": "Enable doorbell notifications",
-          "video_quality": "Video quality"
+          "video_quality": "Video quality",
+          "microphone_gain": "Microphone amplification (phone to entrance)"
         },
         "data_description": {
           "enable_notifications": "Receive doorbell ring and missed call events from the intercom",
-          "video_quality": "Compatible preserves existing resolutions. Maximum requests 1024x608 at 25 fps (reported by the Comelit app for MT-6741W); actual output depends on panel/firmware. Return to Compatible if video stops."
+          "video_quality": "Compatible preserves existing resolutions. Maximum requests 1024x608 at 25 fps (reported by the Comelit app for MT-6741W); actual output depends on panel/firmware. Return to Compatible if video stops.",
+          "microphone_gain": "Boost only the microphone sent to the entrance. Original preserves the signal; +6 dB doubles its amplitude. Reduce the gain if speech distorts."
         }
       }
     }

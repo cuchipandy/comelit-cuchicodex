@@ -129,7 +129,7 @@ suite for signaling, RTP, RTSP and integration regressions.
 - **WiFi sleep** — the 6701W disconnects from WiFi when idle (no active call). Wake it physically (ring the bell, or press a button) before testing network connectivity. The integration reconnects automatically once the device wakes.
 - **No cloud** — requires direct LAN access to the device. Remote access via VPN or a reverse proxy is your responsibility.
 - **Fixed RTSP port** — the integration uses a fixed RTSP port (8557). If another process is using that port at HA startup, the video feed will not work. Change the port in HA configuration or free up 8557.
-- **Door open timing** — when video is active, pressing a door button opens the door then stops video after 10 seconds. This matches the Android app's behavior.
+- **Door opening during calls** — opening the door keeps the call running. If the panel stops media when the relay activates, recovery remains enabled until the user hangs up.
 
 ## Removing the integration
 
@@ -162,7 +162,7 @@ The integration does not persist any state outside the config entry, so no manua
 Systems with more than one call origin also get a doorbell event entity per
 origin, created the first time that origin rings (a floor door appears as
 "Floor call"). Doors are exposed **both** as buttons and as locks — the buttons
-carry the stop-video-after-open behaviour and existing automations; the locks
+preserve existing automations without hanging up the video call; the locks
 exist for HomeKit, voice assistants, and the lock card.
 
 `missed_call` fires when a ring's passive video session ends without the Answer button being pressed (~2 minutes after the ring), or immediately if inbound video fails to start.

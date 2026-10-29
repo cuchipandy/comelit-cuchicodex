@@ -25,6 +25,30 @@ async def test_video_renewal_hands_registration_timestamp_back_to_listener():
     coord._ensure_vip_listener.assert_awaited_once()
 
 
+async def test_door_release_does_not_block_recovery_of_stalled_video():
+    from custom_components.comelit_man.button import ComelitDoorButton
+
+    coord = _make_coordinator(with_client=True)
+    old_session = MagicMock(active=True, manual_audio_used=False)
+    old_session.stop = AsyncMock()
+    coord._video_session = old_session
+    coord._rtsp_server = MagicMock(client_count=1)
+    coord.async_open_door = AsyncMock()
+    button = ComelitDoorButton.__new__(ComelitDoorButton)
+    button.coordinator = coord
+    button._door = coord._config.doors[0]
+    await button.async_press()
+
+    # The relay closed the old media channel; an existing viewer needs recovery.
+    old_session.active = False
+    replacement = MagicMock(active=True)
+    replacement.start = AsyncMock()
+    with patch("custom_components.comelit_man.coordinator.VideoCallSession", return_value=replacement):
+        await coord._auto_restart_video()
+    assert coord._video_session is replacement
+    replacement.start.assert_awaited_once()
+
+
 async def test_manual_audio_reopen_waits_remaining_panel_release_interval():
     coord = _make_coordinator(with_client=True)
     old_session = MagicMock(manual_audio_used=True)

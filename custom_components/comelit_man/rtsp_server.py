@@ -108,6 +108,30 @@ def _linear2alaw(pcm_val: int) -> int:
 _ULAW_TO_ALAW = bytes(_linear2alaw(_ulaw2linear(i)) for i in range(256))
 
 
+def _alaw2linear(value: int) -> int:
+    """Decode one G.711 A-law byte to signed 16-bit PCM."""
+    value ^= 0x55
+    magnitude = (value & 0x0F) << 4
+    segment = (value & 0x70) >> 4
+    if segment == 0:
+        magnitude += 8
+    else:
+        magnitude = (magnitude + 0x108) << (segment - 1)
+    return magnitude if value & 0x80 else -magnitude
+
+
+def _microphone_gain_table(gain: float) -> bytes:
+    """Amplify decoded PCM, saturate safely, then encode back to A-law."""
+    if not 1 <= gain <= 3:
+        raise ValueError("Microphone gain must be between 1 and 3")
+    if gain == 1:
+        return bytes(range(256))
+    return bytes(
+        value if value in (0xD5, 0x55) else _linear2alaw(max(-32768, min(32767, round(_alaw2linear(value) * gain))))
+        for value in range(256)
+    )
+
+
 @dataclasses.dataclass
 class _TcpClient:
     """Per-connection state for one RTSP/TCP client."""
@@ -133,7 +157,8 @@ class LocalRtspServer:
         await server.stop()
     """
 
-    def __init__(self, bind_host: str = "127.0.0.1", port: int = 8557) -> None:
+    def __init__(self, bind_host: str = "127.0.0.1", port: int = 8557, *, microphone_gain: float = 1) -> None:
+        self._microphone_gain_table = _microphone_gain_table(microphone_gain)
         self._bind_host = bind_host
         self._bind_port = port
         self._rtsp_port: int = 0
@@ -696,6 +721,7 @@ class LocalRtspServer:
             return
         if pt == 0:
             payload = payload.translate(_ULAW_TO_ALAW)
+        payload = payload.translate(self._microphone_gain_table)
         self.backchannel_rx_count += 1
         if self.backchannel_rx_count % 250 == 1:
             _LOGGER.debug(
