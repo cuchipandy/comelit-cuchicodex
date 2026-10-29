@@ -312,3 +312,19 @@ class TestComelitAnswerDoorbellButton:
         btn.coordinator.async_answer_inbound = AsyncMock(side_effect=RuntimeError("no session"))
         with pytest.raises(VideoCallError):
             await btn.async_press()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("answer", [False, True])
+async def test_specific_session_error_reaches_service_caller_unchanged(answer):
+    coordinator = MagicMock()
+    coordinator.device_config = MagicMock()
+    specific = VideoCallError("Another manual session may be active")
+    coordinator.async_start_video = AsyncMock(side_effect=specific)
+    coordinator.async_answer_inbound = AsyncMock(side_effect=specific)
+    button = (
+        ComelitAnswerDoorbellButton(coordinator, "test") if answer else ComelitStartVideoButton(coordinator, "test")
+    )
+    with pytest.raises(VideoCallError) as caught:
+        await button.async_press()
+    assert caught.value is specific

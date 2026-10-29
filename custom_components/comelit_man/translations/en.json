@@ -153,6 +153,12 @@
     },
     "video_rtpc_not_received": {
       "message": "Video channel not established \u2014 device did not respond"
+    },
+    "video_session_refused": {
+      "message": "The intercom refused this session (code {code}). Another manual view may already be active."
+    },
+    "video_no_media": {
+      "message": "The intercom is not sending video or audio. Close other manual views and try again."
     }
   },
   "issues": {

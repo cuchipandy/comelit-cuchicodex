@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.5.7 — 2026-10-29
+
+- Fail promptly on an explicit manual-session rejection instead of continuing
+  to open media channels after the device has refused the call.
+- Do not publish a session as ready when no initial video arrives. Preserve the
+  specific service error for clients instead of replacing it with a generic one.
+- Do not automatically renegotiate a session ended before its first video frame;
+  let startup fail and restore the listener without fighting another manual view.
+- Keep normal active-call lease renewal and passive inbound call setup unchanged.
+
 ## 1.5.6 — 2026-10-29
 
 - Share HA’s active media session between viewers; concurrent starts wait for

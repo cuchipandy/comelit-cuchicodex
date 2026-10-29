@@ -126,6 +126,7 @@ class VideoCallSession:
         self._tcp_task: asyncio.Task[None] | None = None
         self._ctpp_task: asyncio.Task[None] | None = None
         self._active = False
+        self._starting = False
         self._device_rtpc_req_id: int = 0
         # True when this session opened CTPP itself (notifications OFF).
         # False when reusing the coordinator-opened channel (notifications ON).
@@ -226,6 +227,19 @@ class VideoCallSession:
                 action,
                 call_counter,
             )
+            if (
+                msg_type in (0x1860, 0x1840)
+                and action == 0x0003
+                and len(resp) >= 12
+                and struct.unpack_from(">H", resp, 8)[0] == 0x000E
+            ):
+                code = struct.unpack_from("<H", resp, 10)[0]
+                _LOGGER.warning("Device refused manual session during negotiation (code=%d)", code)
+                raise VideoCallError(
+                    translation_domain=DOMAIN,
+                    translation_key="video_session_refused",
+                    translation_placeholders={"code": str(code)},
+                )
             if msg_type in (0x1860, 0x1800):
                 continue
             if msg_type == 0x1840:
@@ -297,6 +311,7 @@ class VideoCallSession:
         4. Open 2x RTPC → RTPC link → video config → device RTPC → start media
         """
         client = self._client
+        self._starting = True
 
         try:
             apt_addr = self._config.apt_address
@@ -555,7 +570,9 @@ class VideoCallSession:
                     udp,
                     tcp,
                 )
+                raise VideoCallError(translation_domain=DOMAIN, translation_key="video_no_media")
             else:
+                self._starting = False
                 _LOGGER.info(
                     "Video flowing via %s transport",
                     "TCP" if receiver.tcp_media_packet_count else "UDP",
@@ -596,6 +613,8 @@ class VideoCallSession:
 
         except Exception as e:
             await self._cleanup()
+            if isinstance(e, VideoCallError):
+                raise
             raise VideoCallError(
                 translation_domain=DOMAIN,
                 translation_key="video_call_failed",
@@ -774,36 +793,14 @@ class VideoCallSession:
                     continue
                 msg_type = struct.unpack_from("<H", resp, 0)[0]
                 action = struct.unpack_from(">H", resp, 6)[0] if len(resp) >= 8 else 0
-                sub = struct.unpack_from(">H", resp, 8)[0] if len(resp) >= 10 else 0
                 if msg_type == 0x1840:
                     if action == 0x0003:
-                        # CALL_END (sub=0x0000 = timer, sub=0x000E = door-open triggered)
-                        _LOGGER.debug(
-                            "CTPP monitor: CALL_END received (sub=0x%04X) — re-establishing",
-                            sub,
+                        renewed = await self._handle_call_end(
+                            client, ctpp, our_addr, entrance_addr, rtpc1_server_id, media_req_id, call_counter, resp
                         )
-                        call_end_ts = struct.unpack_from("<I", resp, 2)[0] if len(resp) >= 6 else 0
-                        try:
-                            async with self._ctpp_lock:
-                                call_counter = await self._inline_reestablish(
-                                    client,
-                                    ctpp,
-                                    our_addr,
-                                    entrance_addr,
-                                    rtpc1_server_id,
-                                    media_req_id,
-                                    call_counter,
-                                    call_end_ts=call_end_ts if self._inbound else 0,
-                                )
-                                self._call_counter = call_counter
-                            _LOGGER.debug("CTPP monitor: re-established, lease renewed")
-                        except Exception:
-                            _LOGGER.warning(
-                                "CTPP monitor: inline re-establish failed — falling back to full session restart",
-                                exc_info=True,
-                            )
-                            self._notify_call_end()
+                        if renewed is None:
                             return
+                        call_counter = renewed
                     else:
                         # Keepalive (0x0000) or any other non-CALL_END 0x1840.
                         # If answer_inbound() is draining, forward to its handoff queue
@@ -855,6 +852,46 @@ class VideoCallSession:
         if self._on_call_end:
             self._on_call_end()
 
+    async def _handle_call_end(
+        self,
+        client: IconaBridgeClient,
+        ctpp: Channel,
+        our_addr: str,
+        entrance_addr: str,
+        rtpc1_server_id: int,
+        media_req_id: int,
+        call_counter: int,
+        data: bytes,
+    ) -> int | None:
+        """Renew an established call, but never take over a rejected startup."""
+        if self._starting:
+            _LOGGER.info("Device ended startup before media; not attempting automatic takeover")
+            return None
+        sub = struct.unpack_from(">H", data, 8)[0] if len(data) >= 10 else 0
+        _LOGGER.debug("CTPP monitor: CALL_END received (sub=0x%04X) — re-establishing", sub)
+        call_end_ts = struct.unpack_from("<I", data, 2)[0] if len(data) >= 6 else 0
+        try:
+            async with self._ctpp_lock:
+                call_counter = await self._inline_reestablish(
+                    client,
+                    ctpp,
+                    our_addr,
+                    entrance_addr,
+                    rtpc1_server_id,
+                    media_req_id,
+                    call_counter,
+                    call_end_ts=call_end_ts if self._inbound else 0,
+                )
+                self._call_counter = call_counter
+            _LOGGER.debug("CTPP monitor: re-established, lease renewed")
+            return call_counter
+        except Exception:
+            _LOGGER.warning(
+                "CTPP monitor: inline re-establish failed — falling back to full session restart", exc_info=True
+            )
+            self._notify_call_end()
+            return None
+
     async def _ack_active_message(
         self, client: IconaBridgeClient, ctpp: Channel, our_addr: str, entrance_addr: str, data: bytes
     ) -> int:
@@ -871,7 +908,7 @@ class VideoCallSession:
     def _recover_stalled_video(self, monitor_started: float) -> bool:
         """Release a silent media session even if the device omits CALL_END."""
         receiver = self._rtp_receiver
-        if not receiver:
+        if self._starting or not receiver:
             return False
         timeout = VIDEO_STALL_TIMEOUT if receiver.last_video_packet_at is not None else VIDEO_READY_TIMEOUT + 2
         if time.monotonic() - (receiver.last_video_packet_at or monitor_started) < timeout:
