@@ -36,7 +36,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Comelit
         "connection": {
             "connected": bool(coordinator._client and coordinator._client.connected),
             "connection_lost": coordinator._connection_lost,
-            "vip_listener_active": coordinator._vip_listener is not None,
+            "vip_listener_active": bool(coordinator._vip_listener and coordinator._vip_listener.is_running),
         },
         "video": {
             "requested_quality": entry.options.get(CONF_VIDEO_QUALITY, DEFAULT_VIDEO_QUALITY),

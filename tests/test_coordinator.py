@@ -105,6 +105,7 @@ def _make_coordinator(*, with_client: bool = False) -> ComelitLocalCoordinator:
         mock_client.get_channel = MagicMock(return_value=None)
         mock_client.remove_channel = MagicMock()
         mock_client.open_channel = AsyncMock()
+        mock_client.read_response = AsyncMock(return_value=b"")
         mock_client.send_binary = AsyncMock()
         mock_client.set_disconnect_callback = MagicMock()
         coordinator._client = mock_client
@@ -256,32 +257,29 @@ class TestAsyncStartVideo:
         assert coord._video_ready_event.is_set()
 
     @pytest.mark.asyncio
-    async def test_start_video_drops_concurrent_call(self):
-        """A second async_start_video while one is in progress is dropped, not queued."""
+    async def test_concurrent_viewers_wait_and_share_one_session(self):
         coord = _make_coordinator(with_client=True)
-        started = asyncio.Event()
-        unblock = asyncio.Event()
+        started, unblock = asyncio.Event(), asyncio.Event()
 
         async def slow_start():
             started.set()
             await unblock.wait()
 
-        mock_session = MagicMock()
-        mock_session.start = AsyncMock(side_effect=slow_start)
-
-        with patch(
-            "custom_components.comelit_man.coordinator.VideoCallSession",
-            return_value=mock_session,
-        ):
-            task1 = asyncio.create_task(coord.async_start_video())
-            await started.wait()  # first call is inside the lock
-
-            # Second call should be rejected immediately (lock is held)
-            with pytest.raises(RuntimeError, match="already in progress"):
-                await coord.async_start_video()
-
+        session = MagicMock(active=True)
+        session.start = AsyncMock(side_effect=slow_start)
+        session.stop = AsyncMock()
+        with patch("custom_components.comelit_man.coordinator.VideoCallSession", return_value=session) as factory:
+            first = asyncio.create_task(coord.async_start_video())
+            await started.wait()
+            second = asyncio.create_task(coord.async_start_video(by_user=True))
+            await asyncio.sleep(0)
+            assert not second.done()
             unblock.set()
-            await task1
+            assert await asyncio.wait_for(first, 1) is session
+            assert await asyncio.wait_for(second, 1) is session
+        factory.assert_called_once()
+        session.start.assert_awaited_once()
+        session.stop.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_start_video_resets_stopped_flag(self):
@@ -897,19 +895,17 @@ class TestStartVideoExtended:
             await coord.async_start_video()
 
     @pytest.mark.asyncio
-    async def test_start_video_returns_existing_when_lock_held_with_session(self):
-        """When lock is already held AND a session exists, returns the existing session (line 368)."""
+    async def test_new_viewer_reuses_active_session_without_reset_or_hangup(self):
         coord = _make_coordinator(with_client=True)
-        existing_session = MagicMock()
-        coord._video_session = existing_session
-
-        await coord._video_start_lock.acquire()
-        try:
-            result = await coord.async_start_video()
-        finally:
-            coord._video_start_lock.release()
-
-        assert result is existing_session
+        session = MagicMock(active=True)
+        session.stop = AsyncMock()
+        coord._video_session = session
+        coord._rtsp_server = MagicMock()
+        with patch("custom_components.comelit_man.coordinator.VideoCallSession") as factory:
+            assert await coord.async_start_video(by_user=True) is session
+        factory.assert_not_called()
+        session.stop.assert_not_awaited()
+        coord._rtsp_server.disconnect_clients.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_start_video_raises_not_connected_inside_lock(self):
@@ -1947,3 +1943,88 @@ class TestCoordinatorRemainingPaths:
 
         with pytest.raises(UpdateFailed, match="without a device configuration"):
             await coord._async_update_data()
+
+
+@pytest.mark.asyncio
+async def test_stop_during_start_does_not_publish_cancelled_media():
+    coord = _make_coordinator(with_client=True)
+    coord._ensure_vip_listener = AsyncMock()
+    started, unblock = asyncio.Event(), asyncio.Event()
+
+    async def slow_start():
+        started.set()
+        await unblock.wait()
+
+    session = MagicMock(active=True)
+    session.start = AsyncMock(side_effect=slow_start)
+    session.stop = AsyncMock()
+    with patch("custom_components.comelit_man.coordinator.VideoCallSession", return_value=session):
+        task = asyncio.create_task(coord.async_start_video(by_user=True))
+        await started.wait()
+        coord.request_video_stop()
+        unblock.set()
+        with pytest.raises(RuntimeError, match="cancelled"):
+            await asyncio.wait_for(task, 1)
+    assert coord._video_session is None
+    assert not coord._video_ready_event.is_set()
+    session.stop.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_health_check_repairs_listener_even_when_tcp_is_connected():
+    coord = _make_coordinator(with_client=True)
+    coord._ensure_vip_listener = AsyncMock()
+    assert await coord._async_update_data() is coord._config
+    coord._ensure_vip_listener.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_health_check_never_repairs_listener_during_active_video():
+    coord = _make_coordinator(with_client=True)
+    coord._video_session = MagicMock(active=True)
+    coord._ensure_vip_listener = AsyncMock()
+    await coord._async_update_data()
+    coord._ensure_vip_listener.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_dead_listener_is_replaced_and_missing_channel_registered():
+    coord = _make_coordinator(with_client=True)
+    dead = MagicMock(is_running=False)
+    dead.stop = AsyncMock()
+    coord._vip_listener = dead
+    coord._open_ctpp_channels = AsyncMock(return_value=42)
+    replacement = MagicMock()
+    replacement.start = AsyncMock()
+    with patch("custom_components.comelit_man.coordinator.VipEventListener", return_value=replacement):
+        await coord._ensure_vip_listener()
+    dead.stop.assert_awaited_once()
+    coord._open_ctpp_channels.assert_awaited_once_with(coord._client, coord._config)
+    replacement.start.assert_awaited_once()
+    assert coord._vip_listener is replacement
+
+
+@pytest.mark.asyncio
+async def test_health_refresh_and_user_start_do_not_reconnect_same_identity_twice():
+    coord = _make_coordinator(with_client=True)
+    coord._client.connected = False
+    reconnecting, release = asyncio.Event(), asyncio.Event()
+
+    async def reconnect():
+        reconnecting.set()
+        await release.wait()
+        coord._client.connected = True
+
+    coord._reconnect = AsyncMock(side_effect=reconnect)
+    session = MagicMock(active=True)
+    session.start = AsyncMock()
+    with patch("custom_components.comelit_man.coordinator.VideoCallSession", return_value=session):
+        viewer = asyncio.create_task(coord.async_start_video(by_user=True))
+        await reconnecting.wait()
+        health = asyncio.create_task(coord._async_update_data())
+        await asyncio.sleep(0)
+        assert not health.done()
+        release.set()
+        assert await asyncio.wait_for(viewer, 1) is session
+        assert await asyncio.wait_for(health, 1) is coord._config
+    coord._reconnect.assert_awaited_once()

@@ -81,10 +81,10 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
         self._config: DeviceConfig | None = None
         self._video_session: VideoCallSession | None = None
         self._video_stopped_by_user: bool = False
-        # Prevents concurrent async_start_video calls from racing each other.
-        # The device can only handle one CTPP negotiation at a time; a second
-        # concurrent call would conflict and fail ~35s later with a UDPM timeout.
+        # Serialize lifecycle changes for HA's identity only. Multiple viewers
+        # share its session; this does not exclude other registered device users.
         self._video_start_lock: asyncio.Lock = asyncio.Lock()
+        self._video_stop_generation = 0
         # Fires when a video session becomes ready — allows stream_source()
         # to wait briefly instead of returning None while CTPP is in flight.
         self._video_ready_event: asyncio.Event = asyncio.Event()
@@ -157,7 +157,9 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
         """
         our_addr = f"{config.apt_address}{config.apt_subaddress}"
         ctpp = await client.open_channel("CTPP", ChannelType.UAUT, extra_data=our_addr)
-        await client.open_channel("CSPB", ChannelType.UAUT)
+        cspb = client.get_channel("CSPB")
+        if cspb is None or not cspb.is_open:
+            await client.open_channel("CSPB", ChannelType.UAUT)
         ts = int(time.time()) & 0xFFFFFFFF
         await ctpp_init_sequence(
             client,
@@ -383,9 +385,9 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
     async def async_start_video(self, auto_timeout: bool = True, by_user: bool = False) -> VideoCallSession:
         """Start a video call session.
 
-        Concurrent calls are dropped — the device can only negotiate one
-        CTPP session at a time and a second concurrent start would conflict
-        with the first and fail ~35 s later with a UDPM timeout.
+        Wait for HA's current negotiation and reuse its active session. A
+        second HA viewer must not hang up the existing call. Other registered
+        users have their own identities and are not managed by this lock.
 
         Args:
             auto_timeout: stop the session after VIDEO_SESSION_TIMEOUT seconds.
@@ -399,13 +401,10 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
         if not self._config:
             raise RuntimeError("Not configured")
 
-        if self._video_start_lock.locked():
-            _LOGGER.debug("Video start already in progress — skipping duplicate call")
-            if self._video_session:
-                return self._video_session
-            raise RuntimeError("Video start already in progress")
-
+        stop_generation = getattr(self, "_video_stop_generation", 0)
         async with self._video_start_lock:
+            if stop_generation != getattr(self, "_video_stop_generation", 0):
+                raise RuntimeError("Video start cancelled by a newer stop request")
             if not self._client:
                 raise RuntimeError("Not connected")
 
@@ -429,8 +428,13 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
                 except Exception as err:
                     raise RuntimeError(f"Reconnect failed: {err}") from err
 
+            existing = self._video_session
+            if existing is not None and existing.active is True and not self._video_stopped_by_user:
+                _LOGGER.debug("Reusing active HA video session for another viewer")
+                return existing
+
             self._video_stopped_by_user = False
-            await self.async_stop_video()
+            await self._async_stop_video_locked()
             reopen_delay = self._video_reopen_after - time.monotonic()
             if reopen_delay > 0:
                 _LOGGER.info("Waiting %.1fs before reopening manual-view audio", reopen_delay)
@@ -474,6 +478,9 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
             # user-visible latency stays at ~3 s.
             try:
                 await session.start()
+                if stop_generation != getattr(self, "_video_stop_generation", 0):
+                    await session.stop(reason="stopped during startup")
+                    raise RuntimeError("Video start cancelled by a newer stop request")
                 _LOGGER.info("Video session ready in %.1fs", time.monotonic() - t0)
                 if self._rtsp_server and session.rtp_receiver:
                     session.rtp_receiver.attach_backchannel_queue(self._rtsp_server.backchannel_queue)
@@ -634,7 +641,7 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
             if not self._client:
                 return
             self._video_stopped_by_user = False
-            await self.async_stop_video()
+            await self._async_stop_video_locked()
 
             if self._vip_listener:
                 with contextlib.suppress(Exception):
@@ -779,6 +786,7 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
     def request_video_stop(self) -> None:
         """Mark that the user explicitly requested video to stop."""
         self._video_stopped_by_user = True
+        self._video_stop_generation = getattr(self, "_video_stop_generation", 0) + 1
 
     def _start_keepalive(self) -> None:
         """Start the background keepalive task (cancels any previous one)."""
@@ -833,11 +841,20 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
         call so the restarted listener's outgoing ACKs match the counter
         state the device already has for this CTPP channel.
         """
-        if self._vip_listener or not self._config or not self._client:
+        if not self._config or not self._client:
             return
         if not self.config_entry.options.get(CONF_ENABLE_NOTIFICATIONS, True):
             return
+        if self._vip_listener and self._vip_listener.is_running:
+            return
         try:
+            if self._vip_listener:
+                _LOGGER.warning("VIP listener stopped or channel closed — restoring HA's registration")
+                await self._vip_listener.stop()
+                self._vip_listener = None
+            ctpp = self._client.get_channel("CTPP")
+            if ctpp is None or not ctpp.is_open:
+                await self._open_ctpp_channels(self._client, self._config)
             vip = VipEventListener(
                 self._client,
                 self._config,
@@ -853,7 +870,12 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
             _LOGGER.warning("Failed to restart VIP listener", exc_info=True)
 
     async def async_stop_video(self) -> None:
-        """Stop the active video call session.
+        """Serialize teardown with startup and listener repair for HA's identity."""
+        async with self._video_start_lock:
+            await self._async_stop_video_locked(restore_listener=True)
+
+    async def _async_stop_video_locked(self, *, restore_listener: bool = False) -> None:
+        """Stop the active video call session while holding the lifecycle lock.
 
         Snapshots _video_session and clears it immediately so a concurrent
         async_stop_video call can't also try to stop the same session
@@ -907,9 +929,9 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
             self._rtsp_server.mark_not_ready()
             self._rtsp_server.disconnect_clients()
         # Restart VIP listener now that video released the CTPP slot.
-        # Skip if we're inside async_start_video (lock already held) —
-        # start_video will stop VIP again immediately anyway.
-        if not self._video_start_lock.locked():
+        # Internal replacement starts media immediately; external teardown
+        # restores reception before releasing the lifecycle lock.
+        if restore_listener:
             await self._ensure_vip_listener()
         await self._notify_video_state_change()
 
@@ -937,6 +959,10 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
     async def _async_update_data(self) -> DeviceConfig:
         """Health-check the connection; reconnect if needed."""
         if self._client and self._client.connected and self._config:
+            if self._video_session is None and not self._video_start_lock.locked():
+                async with self._video_start_lock:
+                    if self._video_session is None:
+                        await self._ensure_vip_listener()
             return self._config
 
         # Connection lost or no config — attempt reconnect.
@@ -947,7 +973,11 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
             self._connection_lost = True
 
         try:
-            await self._reconnect()
+            async with self._video_start_lock:
+                # A foreground start may have reconnected while this refresh
+                # waited. Never register a second TCP client under HA's identity.
+                if not (self._client and self._client.connected and self._config):
+                    await self._reconnect()
         except AuthenticationError as err:
             ir.async_create_issue(
                 self.hass,

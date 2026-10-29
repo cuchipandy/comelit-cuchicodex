@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.5.6 — 2026-10-29
+
+- Share HA’s active media session between viewers; concurrent starts wait for
+  the same negotiation instead of replacing a live call or failing immediately.
+- Serialize teardown with startup and cancel queued/pending starts after an
+  explicit stop, preventing an old negotiation from publishing orphaned video.
+- Serialize health-check reconnects with foreground starts so HA does not create
+  two competing registrations under its own identity.
+- Health-check the real VIP listener task and CTPP channel even while TCP is
+  connected. Recover a dead listener or closed registration under HA’s identity.
+- Keep the VIP loop alive after a malformed event and preserve unsolicited rings
+  received during the registration handshake.
+- Report actual listener health in diagnostics instead of object existence.
+- These lifecycle changes are scoped to HA’s dedicated identity; they do not
+  impose a device-wide limit on other registered users’ sessions.
+
 ## 1.5.5 — 2026-10-28
 
 - Serialize Answer Doorbell with inbound setup so answering an early notification
