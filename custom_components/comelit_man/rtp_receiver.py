@@ -33,7 +33,7 @@ def _build_control_packet(control_req_id: int, udpm_token: int, seq: int) -> byt
             (udpm_token >> 8) & 0xFF,
             0x00,
             seq & 0xFF,
-            0x00,
+            int(seq >= 2),  # Discovery probes use 0; subsequent packets announce UDP media.
             0x80,
         ]
     )
@@ -83,6 +83,7 @@ class RtpReceiver:
         self._port = port
         self._control_req_id = control_req_id
         self._media_req_id = media_req_id
+        self._audio_req_id = 0
         self._udpm_token = udpm_token
 
         # UDP transport to device
@@ -119,6 +120,9 @@ class RtpReceiver:
 
         # Latest decoded JPEG frame
         self._latest_frame: bytes | None = None
+        self.video_dimensions: tuple[int, int] | None = None
+        self.last_video_packet_at: float | None = None
+        self.video_packet_count = 0
         self._frame_event = asyncio.Event()
 
         self._running = False
@@ -181,7 +185,7 @@ class RtpReceiver:
         _LOGGER.debug("Backchannel queue attached")
 
     async def start_control(self) -> int:
-        """Open UDP socket and send 2 discovery packets.
+        """Open UDP socket, discover it and announce media readiness.
 
         Call this right after UDPM opens so the device learns our UDP
         port before we send video config. Does NOT start the keepalive
@@ -198,6 +202,11 @@ class RtpReceiver:
         self._running = True
 
         self._send_control()
+        await asyncio.sleep(0.3)
+        self._send_control()
+        await asyncio.sleep(0.3)
+        # The app sends this third, media-ready probe before RTPC/video
+        # configuration. Deferring it to keepalive can leave a new call idle.
         self._send_control()
         _LOGGER.debug(
             "UDP socket ready: local port %d -> %s:%d (control=0x%04X, token=0x%04X)",
@@ -218,6 +227,8 @@ class RtpReceiver:
         self,
         device_rtpc_req_id: int,
         tcp_send: Callable[[bytes], Awaitable[None]] | None = None,
+        *,
+        restart: bool = False,
     ) -> None:
         """Start sending PCMA audio frames to the device.
 
@@ -233,8 +244,12 @@ class RtpReceiver:
         RTPC channel instead.
         """
         if self._audio_sender_task and not self._audio_sender_task.done():
-            _LOGGER.debug("Audio sender already running — skipping duplicate start")
-            return
+            if not restart:
+                _LOGGER.debug("Audio sender already running — skipping duplicate start")
+                return
+            # Renewal assigns a new device RTPC id. Retire the old sender
+            # before scheduling a task bound to the replacement channel.
+            self._audio_sender_task.cancel()
         self._audio_sender_task = asyncio.create_task(self._audio_send_loop(device_rtpc_req_id, tcp_send))
         _LOGGER.debug("Audio sender started (device_rtpc_req_id=0x%04X)", device_rtpc_req_id)
 
@@ -320,6 +335,10 @@ class RtpReceiver:
         self._media_req_id = media_req_id
         _LOGGER.debug("Media req_id set to 0x%04X", media_req_id)
 
+    def set_audio_req_id(self, audio_req_id: int) -> None:
+        """Set the separate RTPC1 UDP audio channel (RTPC2 carries video)."""
+        self._audio_req_id = audio_req_id
+
     async def start_media(self) -> None:
         """Start the decode task for processing H.264 NAL units.
 
@@ -378,7 +397,7 @@ class RtpReceiver:
 
         req_id = struct.unpack_from("<H", data, 4)[0]
 
-        if req_id == self._media_req_id:
+        if req_id == self._media_req_id or (self._audio_req_id and req_id == self._audio_req_id):
             # Strip 8-byte ICONA header AND Comelit trailer using body_len
             body_len = struct.unpack_from("<H", data, 2)[0]
             raw_rtp = data[HEADER_SIZE : HEADER_SIZE + body_len]
@@ -410,6 +429,9 @@ class RtpReceiver:
             # G.711 audio: PT 0 = PCMU (μ-law), PT 8 = PCMA (A-law)
             self._process_audio_rtp(rtp, payload_type)
             return
+
+        self.last_video_packet_at = time.monotonic()
+        self.video_packet_count += 1
 
         # RTP pass-through: forward raw video RTP to the RTSP server
         # immediately — no NAL reassembly delay.
@@ -620,6 +642,7 @@ class RtpReceiver:
                         )
                         for w, h, jpeg_data in decoded:
                             frame_count += 1
+                            self.video_dimensions = (w, h)
                             self._latest_frame = jpeg_data
                             self._frame_event.set()
                             if verbose and (frame_count <= 5 or frame_count % 50 == 0):
@@ -725,6 +748,7 @@ class RtpReceiver:
         self._protocol = None
 
         self._latest_frame = None
+        self.video_dimensions = None
         _LOGGER.debug(
             "RTP receiver stopped (received %d media packets)",
             self._media_packet_count,

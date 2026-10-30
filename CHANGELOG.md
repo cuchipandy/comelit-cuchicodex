@@ -1,5 +1,91 @@
 # Changelog
 
+## 1.5.7 — 2026-10-29
+
+- Fail promptly on an explicit manual-session rejection instead of continuing
+  to open media channels after the device has refused the call.
+- Do not publish a session as ready when no initial video arrives. Preserve the
+  specific service error for clients instead of replacing it with a generic one.
+- Do not automatically renegotiate a session ended before its first video frame;
+  let startup fail and restore the listener without fighting another manual view.
+- Keep normal active-call lease renewal and passive inbound call setup unchanged.
+
+## 1.5.6 — 2026-10-29
+
+- Share HA’s active media session between viewers; concurrent starts wait for
+  the same negotiation instead of replacing a live call or failing immediately.
+- Serialize teardown with startup and cancel queued/pending starts after an
+  explicit stop, preventing an old negotiation from publishing orphaned video.
+- Serialize health-check reconnects with foreground starts so HA does not create
+  two competing registrations under its own identity.
+- Health-check the real VIP listener task and CTPP channel even while TCP is
+  connected. Recover a dead listener or closed registration under HA’s identity.
+- Keep the VIP loop alive after a malformed event and preserve unsolicited rings
+  received during the registration handshake.
+- Report actual listener health in diagnostics instead of object existence.
+- These lifecycle changes are scoped to HA’s dedicated identity; they do not
+  impose a device-wide limit on other registered users’ sessions.
+
+## 1.5.5 — 2026-10-28
+
+- Serialize Answer Doorbell with inbound setup so answering an early notification
+  waits for the passive session and activates its audio instead of racing startup.
+- Let Answer Doorbell start manual media when no physical ring exists, supporting
+  app/Tasker tests without guessing the session state from a camera entity.
+- Report video-start and answer failures as service errors instead of silently
+  telling the app the request succeeded.
+- Add regressions for early answer, test intents without a ring and failed audio setup.
+
+## 1.5.4 — 2026-10-28
+
+- Enable MT-6741W manual-view audio using the official app's captured 48-byte
+  entrance peer. Remove the extra HANGUP/ZERO that prevented audio activation.
+- Receive UDP audio on RTPC1 independently of video on RTPC2; announce UDP
+  media readiness after discovery, matching the app's control packets.
+- Connect the RTSP microphone backchannel to the device-owned RTPC channel,
+  matching UDP/TCP transport and replacing the sender when the channel renews.
+- Explicitly hang up manual-view audio when the viewer closes.
+- Complete the app's media-channel END and hangup handshake, stop microphone
+  carriers first and cancel pending answer tasks during teardown.
+- Allow delayed startup media and wait 20 seconds between manual audio sessions
+  on this experimental branch. Rapid reopen failed on the tested MT-6741W;
+  reopen after that interval received video and audio. Stop cancels a queued start.
+- Request the app's 1000-kbps HD setting. Decoding the official app capture
+  still shows 640x240; 1024x608 is a requested ceiling, not verified output.
+- Add capture-based signaling, UDP audio routing and backchannel regressions.
+
+## 1.5.3 — 2026-10-28
+
+- Fix MT-6741W outbound keepalive ACKs: use the call's own counter rather than
+  the inbound timestamp transform. Verified for 95 seconds and two renewals.
+- Keep the latest counter when renewing a call; retain the inbound ACK transform.
+- Acknowledge registration renewals separately from call counters and hand the
+  refreshed registration timestamp back to the doorbell listener after video.
+- Route outbound TCP media from both RTPC tracks; maintain RTSP silence during
+  lease negotiation so go2rtc does not disconnect for lack of packets.
+- Recover video that stalls without CALL_END; expose packet count and age in
+  diagnostics instead of relying on an old decoded frame.
+- Record the measured limit on the tested MT-6741W: maximum profile received
+  640x240 at about 25 fps. 1024x608 and manual-view audio remain unverified/unresolved.
+
+
+## 1.5.2 — 2026-10-28
+
+- Add configurable video quality, including MT-6741W app parameters 1024x608 at
+  25 fps, applied to inbound/outbound setup and renewals. Compatible stays default.
+- Fix microphone capture/answer and reconnect races; restrict card audio to G.711,
+  enable echo/noise suppression and distinguish permission errors from HTTPS errors.
+- Release late microphone tracks/signaling subscriptions after dismissal. Report
+  device audio-channel timeouts instead of silently marking the answer successful.
+- Strip RTP padding from talk-back audio and reject invalid RTP versions.
+- Add received video dimensions and audio packet counters to diagnostics.
+- Add frontend regression tests to CI and signaling/padding regression tests.
+- Use a monotonic clock to initialize client request IDs without an event loop.
+
+Hardware validation on the user's MT-6741W remains pending; requesting a
+resolution does not confirm what a particular panel/firmware will deliver.
+
+
 ## 1.5.1
 
 ### Bug fixes

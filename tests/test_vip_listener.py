@@ -1103,3 +1103,30 @@ class TestInboundRingCallbackErrors:
         )
 
         hook.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_bad_event_does_not_kill_listener_and_closed_channel_is_detected():
+    listener = _make_listener(MagicMock())
+    channel = MagicMock(is_open=True)
+    channel.response_queue = asyncio.Queue()
+    listener._client.get_channel.return_value = channel
+    listener._process_message = AsyncMock(side_effect=[ValueError("bad event"), None])
+    await listener.start()
+    try:
+        assert listener.is_running
+        channel.response_queue.put_nowait(b"bad")
+        channel.response_queue.put_nowait(b"good")
+        for _ in range(10):
+            await asyncio.sleep(0)
+            if listener._process_message.await_count == 2:
+                break
+        assert listener._process_message.await_count == 2
+        assert listener.is_running
+        channel.is_open = False
+        assert not listener.is_running
+        listener._client.get_channel.return_value = None
+        assert not listener.is_running
+    finally:
+        await listener.stop()
+    assert not listener.is_running

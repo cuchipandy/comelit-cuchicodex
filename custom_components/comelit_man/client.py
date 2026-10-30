@@ -7,6 +7,7 @@ import contextlib
 import logging
 import socket
 import struct
+import time
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -24,6 +25,7 @@ from .protocol import (
     encode_channel_open_response,
     encode_header,
     encode_json_message,
+    encode_media_end,
     is_json_body,
     parse_command_response,
 )
@@ -43,7 +45,7 @@ class IconaBridgeClient:
         self.port = port
         self._reader: asyncio.StreamReader | None = None
         self._writer: asyncio.StreamWriter | None = None
-        self._request_id = 8000 + int(asyncio.get_event_loop().time() * 10) % 1000
+        self._request_id = 8000 + int(time.monotonic() * 10) % 1000
         self._sequence = 0
         self._channels: dict[str, Channel] = {}
         self._receive_task: asyncio.Task[None] | None = None
@@ -291,15 +293,7 @@ class IconaBridgeClient:
                 # PCAP-verified: app sends ef01 0400 04000000 [ch_id LE16] 0000.
                 sub_type = struct.unpack_from("<I", body, 4)[0] if len(body) >= 8 else 0
                 if sub_type == 2:
-                    ack_body = (
-                        struct.pack("<HH", 0x01EF, 4)  # END magic + seq=4
-                        + struct.pack("<I", 4)  # sub_type=4 (close ACK)
-                        + struct.pack("<H", server_ch_id)  # channel being closed
-                        + b"\x00\x00"  # padding
-                    )
-                    ack_pkt = b"\x00\x06" + struct.pack("<H", len(ack_body)) + b"\x00\x00\x00\x00" + ack_body
-                    if self._writer:
-                        self._writer.write(ack_pkt)
+                    self._ack_media_end(server_ch_id)
                     _LOGGER.debug(
                         "Sent close ACK for ch=0x%04X (device-initiated END)",
                         server_ch_id,
@@ -380,6 +374,20 @@ class IconaBridgeClient:
             return
         seq = self._next_sequence()
         await self._send(encode_channel_close(seq, channel.server_channel_id))
+
+    def _ack_media_end(self, server_channel_id: int) -> None:
+        """Confirm a device-owned media channel has closed."""
+        if self._writer:
+            self._writer.write(encode_media_end(server_channel_id, response=True))
+        for channel in self._channels.values():
+            if channel.server_channel_id == server_channel_id:
+                channel.is_open = False
+
+    async def close_media_channel(self, name: str) -> None:
+        """Release a video-owned channel on the wire before forgetting its id."""
+        channel = self._channels.pop(name, None)
+        if channel is not None and channel.is_open:
+            await self._send(encode_media_end(channel.server_channel_id))
 
     async def send_json(self, channel: Channel, msg: dict[str, Any]) -> dict[str, Any]:
         """Send a JSON message on a channel and wait for JSON response.

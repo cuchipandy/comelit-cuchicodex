@@ -66,9 +66,62 @@ After setup, you can configure the integration via **Settings → Integrations �
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| Video quality | Compatible | Select Compatible, 800x480 for all calls, or Maximum (1024x608 at 25 fps). |
 | Enable notifications | On | Receive doorbell ring and door events. Disable if you only need video and door control, or to troubleshoot the notification connection. |
 
 Changing this setting reloads the integration automatically.
+
+### Maximum video quality and two-way audio (MT-6741W)
+
+Choose **Configure → Video quality → Maximum (1024x608, 25 fps)** to request
+these native stream parameters. They are based on the Comelit app settings
+reported for the MT-6741W. Live testing on one MT-6741W on 2026-10-28
+received **640x240 at approximately 25 fps**, not 1024x608. The requested
+profile is not a guarantee of native camera resolution. The profile
+is used for incoming calls, manual viewing and call renewals. Both resolution fields are set to 1024x608, matching the app screenshot.
+Maximum also sends the app's captured 1000-kbps HD setting. Decoding a capture
+of the official app on this installation likewise produced 640x240, including
+the segments with HD enabled.
+Legacy profiles retain the captured secondary 320x240 fields. H.264 is relayed without upscaling or
+transcoding, with a maximum 1400-byte payload when the RTSP server packetizes
+NAL units. In pass-through mode the original device packet boundaries are kept;
+the reported app/device limit is also 1400 bytes. Compatible remains the default
+(800x480 outbound, 320x240 inbound, 16 fps). If Maximum produces no picture,
+select Compatible again.
+
+For talking back, use **comelit-doorbell-card**, configure `answer_entity`,
+open Home Assistant over **HTTPS** (local TLS or a remote HTTPS URL), and allow
+microphone access. Press **Answer** to enable the microphone, either while
+viewing the camera manually or during an incoming doorbell call. The card
+negotiates G.711 audio, enables the microphone when answered, and restores it
+on reconnection. A permission refusal now has its own message. HTTP still allows
+video and listening, but browser microphone capture requires a secure origin.
+**MT-6741W manual viewing now enables entrance audio without a doorbell ring.**
+The microphone remains controlled by the card's Answer/mute controls. Live
+testing confirmed incoming PCMA and outgoing backchannel packet flow; hearing
+and microphone intelligibility still need an on-site check. The presence of an
+RTSP audio track alone does not prove entrance audio is arriving.
+After closing a manual session that used audio, the integration keeps a
+**20-second interval before starting another manual session**. Live MT-6741W
+tests passed with this interval; faster reopen could negotiate successfully
+but deliver no audio. An early reopen waits for the remaining interval, and
+Stop cancels that pending start. Incoming doorbell calls use their own flow.
+
+Download the integration diagnostics while the call is active to compare
+`requested_quality` with `received_dimensions`. The latter is measured from
+decoded frames, not copied from the requested profile. Check `audio_rx_packets`
+(entrance audio), `mic_rx_packets` (go2rtc → integration), and `mic_tx_frames`
+(integration → entrance). Increasing counters verify packet flow; confirm
+intelligible sound in both directions with someone at the entrance. Check
+mute/unmute and repeat after 30 seconds to cover call renewal.
+`video_rx_packets` and `last_video_packet_age_s` distinguish fresh video from
+a stale last JPEG. The integration restarts a silent media session after
+8 seconds when the device supplies no CALL_END. During normal renewal, RTSP
+silence keeps go2rtc connected while video signaling runs.
+
+Developer checks: `node --test tests/test_doorbell_card.cjs` covers permission,
+answer timing, reconnection, cancellation and codec selection. Run the Python
+suite for signaling, RTP, RTSP and integration regressions.
 
 ## Known limitations
 
@@ -76,7 +129,7 @@ Changing this setting reloads the integration automatically.
 - **WiFi sleep** — the 6701W disconnects from WiFi when idle (no active call). Wake it physically (ring the bell, or press a button) before testing network connectivity. The integration reconnects automatically once the device wakes.
 - **No cloud** — requires direct LAN access to the device. Remote access via VPN or a reverse proxy is your responsibility.
 - **Fixed RTSP port** — the integration uses a fixed RTSP port (8557). If another process is using that port at HA startup, the video feed will not work. Change the port in HA configuration or free up 8557.
-- **Door open timing** — when video is active, pressing a door button opens the door then stops video after 10 seconds. This matches the Android app's behavior.
+- **Door opening during calls** — opening the door keeps the call running. If the panel stops media when the relay activates, recovery remains enabled until the user hangs up.
 
 ## Removing the integration
 
@@ -109,7 +162,7 @@ The integration does not persist any state outside the config entry, so no manua
 Systems with more than one call origin also get a doorbell event entity per
 origin, created the first time that origin rings (a floor door appears as
 "Floor call"). Doors are exposed **both** as buttons and as locks — the buttons
-carry the stop-video-after-open behaviour and existing automations; the locks
+preserve existing automations without hanging up the video call; the locks
 exist for HomeKit, voice assistants, and the lock card.
 
 `missed_call` fires when a ring's passive video session ends without the Answer button being pressed (~2 minutes after the ring), or immediately if inbound video fails to start.
