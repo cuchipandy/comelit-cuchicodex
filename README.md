@@ -123,9 +123,24 @@ Developer checks: `node --test tests/test_doorbell_card.cjs` covers permission,
 answer timing, reconnection, cancellation and codec selection. Run the Python
 suite for signaling, RTP, RTSP and integration regressions.
 
+### MT-6741W requested and received resolution
+
+The inspected official-app capture requests 1024x608 for both resolution bounds,
+25 fps and 1000 kbps in its video configuration. Its H.264 stream nevertheless
+decodes to 640x240, matching the integration's observed output. The captured SPS
+is `6742001fe90140fd00b1021280`; the decoder reports no sample-aspect-ratio value.
+These observations apply to that captured session and do not establish the
+hardware's maximum resolution. Requesting a larger frame does not guarantee
+that the entrance or monitor sends it. Upscaling the image would not add detail.
+
+Presentation is separate: a 640x240 frame must not be cropped to fill a 4:3
+viewport. The Android video-framing branch fits the renderer to the whole frame
+and keeps its last image during preview-to-conversation negotiation. The existing
+resolution profiles and device signaling are unchanged in this investigation.
+
 ## Known limitations
 
-- **Single concurrent video session** — only one video stream can be active at a time. Starting a second session stops the first.
+- **Concurrent manual views** — on the tested MT-6741W, independent manual views block each other with both the official app and the physical monitor. This does not imply that an incoming call cannot ring on multiple endpoints.
 - **WiFi sleep** — the 6701W disconnects from WiFi when idle (no active call). Wake it physically (ring the bell, or press a button) before testing network connectivity. The integration reconnects automatically once the device wakes.
 - **No cloud** — requires direct LAN access to the device. Remote access via VPN or a reverse proxy is your responsibility.
 - **Fixed RTSP port** — the integration uses a fixed RTSP port (8557). If another process is using that port at HA startup, the video feed will not work. Change the port in HA configuration or free up 8557.
