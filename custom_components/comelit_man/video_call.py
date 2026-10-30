@@ -1295,6 +1295,11 @@ class VideoCallSession:
             receiver.set_media_req_id(media_req_id)
             await receiver.start_media()
 
+            # Consume TCP media as soon as RTPC2 opens, including the first
+            # SPS/PPS/IDR burst during video configuration and its 3s retransmit.
+            self._tcp_task = asyncio.create_task(self._tcp_inbound_media_router(client, rtpc1, rtpc2, receiver))
+            await asyncio.sleep(0)
+
             # Step 9: RTPC2-ready (+B4) — purpose unknown; required by device (PCAP2)
             call_counter = (call_counter + _CTR_INCR_BYTE4) & 0xFFFFFFFF
             await client.send_binary(ctpp, encode_rtpc2_ready(our_addr, our_base_addr, call_counter))
@@ -1321,8 +1326,6 @@ class VideoCallSession:
             # to answer_inbound() — called explicitly when the user presses "Answer".
             # This keeps the call passive (other phones still ring) until the user decides.
 
-            # Also accept TCP media on RTPC2 (video) and RTPC1 (audio).
-            self._tcp_task = asyncio.create_task(self._tcp_inbound_media_router(client, rtpc1, rtpc2, receiver))
             self._call_counter = call_counter
             self._ctpp_task = asyncio.create_task(
                 self._ctpp_monitor_loop(

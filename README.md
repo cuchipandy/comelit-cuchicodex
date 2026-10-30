@@ -134,9 +134,15 @@ hardware's maximum resolution. Requesting a larger frame does not guarantee
 that the entrance or monitor sends it. Upscaling the image would not add detail.
 
 Presentation is separate: a 640x240 frame must not be cropped to fill a 4:3
-viewport. The Android video-framing branch fits the renderer to the whole frame
-and keeps its last image during preview-to-conversation negotiation. The existing
-resolution profiles and device signaling are unchanged in this investigation.
+viewport. Portero 0.2.15 deliberately stretches the complete image into a fixed
+4:3 viewport, retaining both sides, and keeps its last image during
+preview-to-conversation negotiation. This changes presentation, not source resolution.
+
+Comelit Man 1.5.12 starts consuming inbound TCP media immediately after RTPC2
+opens, before video configuration and its retransmit. Portero keeps the incoming
+session receive-only, retries WebRTC failures while ringing, waits beyond the
+old 12-second cutoff, and refreshes a JPEG fallback while the live decoder starts.
+Answering remains a separate user action; preview does not activate the microphone.
 
 ## Known limitations
 

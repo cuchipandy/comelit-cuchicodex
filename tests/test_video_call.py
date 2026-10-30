@@ -1728,6 +1728,12 @@ class TestStartInbound:
         session = self._make_session(config, mock_client)
         session._video_quality = quality
 
+        async def assert_early_video_reader(_channel, payload):
+            if len(payload) >= 8 and payload[6:8] == b"\x00\x1a":
+                assert session._tcp_task is not None, "TCP media must be consumed before video configuration"
+
+        mock_client.send_binary.side_effect = assert_early_video_reader
+
         # Unblock the response_queue drains immediately (empty queues = TimeoutError handled)
         with (
             patch("custom_components.comelit_man.video_call.RtpReceiver", return_value=mock_receiver),
