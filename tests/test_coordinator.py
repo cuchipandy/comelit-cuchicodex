@@ -49,6 +49,21 @@ async def test_door_release_does_not_block_recovery_of_stalled_video():
     replacement.start.assert_awaited_once()
 
 
+async def test_app_gain_change_is_persisted_without_restarting_video():
+    coord = _make_coordinator(with_client=True)
+    coord._rtsp_server = MagicMock()
+    session = MagicMock(active=True)
+    coord._video_session = session
+    gain = "1.5848931924611136"
+    await coord.async_set_microphone_gain(gain)
+    coord._rtsp_server.set_microphone_gain.assert_called_once_with(float(gain))
+    options = coord.hass.config_entries.async_update_entry.call_args.kwargs["options"]
+    assert options["microphone_gain"] == gain
+    assert options["enable_notifications"] is True
+    assert coord._video_session is session
+    session.stop.assert_not_called()
+
+
 async def test_manual_audio_reopen_waits_remaining_panel_release_interval():
     coord = _make_coordinator(with_client=True)
     old_session = MagicMock(manual_audio_used=True)

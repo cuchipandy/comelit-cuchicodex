@@ -32,6 +32,7 @@ from .const import (
     DEFAULT_MICROPHONE_GAIN,
     DEFAULT_VIDEO_QUALITY,
     DOMAIN,
+    MICROPHONE_GAIN_PROFILES,
 )
 from .ctpp import _CTR_INCR_BOTH, ctpp_init_sequence
 from .door import open_door
@@ -364,6 +365,17 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
                 cb(event)
             except Exception:
                 _LOGGER.exception("Error in push callback")
+
+    async def async_set_microphone_gain(self, gain: str) -> None:
+        """Apply and persist microphone gain without reloading the integration."""
+        if gain not in MICROPHONE_GAIN_PROFILES:
+            raise ValueError("Unsupported microphone gain")
+        if self._rtsp_server:
+            self._rtsp_server.set_microphone_gain(float(gain))
+        self.hass.config_entries.async_update_entry(
+            self.config_entry, options={**self.config_entry.options, CONF_MICROPHONE_GAIN: gain}
+        )
+        await self._notify_video_state_change()
 
     async def async_open_door(self, door: Door) -> None:
         """Open a door.

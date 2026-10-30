@@ -2377,6 +2377,20 @@ class TestTruncatedRtpExtension:
 
 
 class TestBackchannelPcmuConversion:
+    def test_gain_can_be_lowered_during_a_session_without_resetting_queues(self):
+        from custom_components.comelit_man.rtsp_server import _alaw2linear
+
+        server = LocalRtspServer(microphone_gain=2)
+        queue = server.backchannel_queue
+        server._on_backchannel_rtp(_rtp(pt=8, payload=b"\xfa" * 160))
+        louder = _alaw2linear(queue.get_nowait()[0])
+        server.set_microphone_gain(10 ** (4 / 20))
+        server._on_backchannel_rtp(_rtp(pt=8, payload=b"\xfa" * 160))
+        quieter = _alaw2linear(queue.get_nowait()[0])
+        assert 1500 < quieter < louder
+        assert server.backchannel_queue is queue
+        assert server.backchannel_rx_count == 2
+
     @pytest.mark.parametrize("pt", [0, 8])
     def test_microphone_gain_doubles_quiet_speech_without_changing_frame_length(self, pt):
         from custom_components.comelit_man.rtsp_server import _alaw2linear, _ulaw2linear

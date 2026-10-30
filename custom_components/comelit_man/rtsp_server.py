@@ -258,6 +258,10 @@ class LocalRtspServer:
         # emitting its first Sender Report.
         self._first_media_event: asyncio.Event = asyncio.Event()
 
+    def set_microphone_gain(self, gain: float) -> None:
+        """Replace the microphone table without restarting any media session."""
+        self._microphone_gain_table = _microphone_gain_table(gain)
+
     @property
     def rtsp_url(self) -> str:
         """Return the RTSP URL that go2rtc should connect to."""

@@ -10,7 +10,15 @@ CONF_VIDEO_QUALITY = "video_quality"
 DEFAULT_VIDEO_QUALITY = "compatible"
 CONF_MICROPHONE_GAIN = "microphone_gain"
 DEFAULT_MICROPHONE_GAIN = "1"
-MICROPHONE_GAIN_PROFILES = {"1": "Original (0 dB)", "1.5": "+3.5 dB", "2": "+6 dB", "3": "+9.5 dB"}
+MICROPHONE_GAIN_PROFILES = {
+    "1": "Original (0 dB)",
+    "1.2589254117941673": "+2 dB",
+    "1.5": "+3.5 dB",
+    "1.5848931924611136": "+4 dB",
+    "2": "+6 dB",
+    "2.51188643150958": "+8 dB",
+    "3": "+9.5 dB",
+}
 # Requested device resolutions; actual output depends on the panel/firmware.
 # Compatible preserves the captured 800x480 outbound / 320x240 inbound flow.
 VIDEO_QUALITY_PROFILES = {

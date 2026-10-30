@@ -340,7 +340,9 @@ async def test_camera_setup_entry_creates_external_and_intercom(camera):
     entry.runtime_data = coordinator
     entry.entry_id = "entry_abc"
     added: list = []
-    await async_setup_entry(MagicMock(), entry, lambda ents: added.extend(ents))
+    with patch("custom_components.comelit_man.camera.entity_platform.async_get_current_platform") as platform:
+        await async_setup_entry(MagicMock(), entry, lambda ents: added.extend(ents))
+    platform.return_value.async_register_entity_service.assert_called_once()
     assert len(added) == 2
     assert isinstance(added[0], ComelitCamera)
     assert isinstance(added[1], ComelitIntercomCamera)
