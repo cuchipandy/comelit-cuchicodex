@@ -404,5 +404,6 @@ Accepted incoming calls now perform the captured release handshake, and door
 commands retain the entrance relay while addressing the incoming apartment
 callee. Manual-view messages retain their existing format.
 
-See [the capture comparison](docs/mt6741w-real-incoming-2026-11-01.md) for measured
-timings, remaining differences and the limits of offline validation.
+See [the capture-derived tests](tests/test_mt6741w_incoming_capture.py) for the
+control messages and regressions. The detailed PCAP comparison remains local,
+following the repository policy for protocol investigations.
