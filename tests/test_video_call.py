@@ -1743,6 +1743,13 @@ class TestStartInbound:
 
         assert result is mock_receiver
         assert session.active is True
+        codec_acks = [
+            call.args[1]
+            for call in mock_client.send_binary.call_args_list
+            if len(call.args[1]) >= 16 and call.args[1][6:10] == b"\x00\x08\x00\x03"
+        ]
+        assert len(codec_acks) == 2
+        assert all(payload[10:16] == bytes.fromhex("490027000000") for payload in codec_acks)
         configs = [
             call.args[1]
             for call in mock_client.send_binary.call_args_list

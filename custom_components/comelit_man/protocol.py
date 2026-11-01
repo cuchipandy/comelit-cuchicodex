@@ -334,7 +334,9 @@ def encode_call_ack(caller: str, callee: str, timestamp: int, codec_param: int =
 
     Sent after receiving initial call responses.
     Extra bytes: 0x49='I' codec marker, 0x00, codec_param, padding.
-    codec_param: 0x27 for outbound (HA-initiated), 0x07 for inbound (PCAP-verified).
+    codec_param: 0x27 in MT-6741W manual and real incoming captures.
+    An older incoming reference used 0x07; the direction alone does not
+    determine these capability flags.
     """
     return _build_ctpp_video_msg(
         prefix=0x1840,
@@ -538,6 +540,8 @@ def encode_door_open_during_video(
     entrance_addr: str,
     call_counter: int,
     relay_index: int,
+    *,
+    callee: str | None = None,
 ) -> bytes:
     """Encode a door open command for use on an active video CTPP channel.
 
@@ -548,7 +552,10 @@ def encode_door_open_during_video(
     Body structure (48 bytes):
       [LE16 0x1840] [LE32 counter] [BE16 0x000D] [BE16 0x002D]
       [entrance_addr padded to 10] [LE32 relay_index] [4x 0xFF]
-      [our_addr padded to 10] [entrance_addr padded to 10]
+      [our_addr padded to 10] [call callee padded to 10]
+
+    The callee is the entrance for manual viewing, but our apartment base
+    during an incoming call (2026-11-01 official-app capture).
 
     relay_index: the door's output_index from the device config (PCAP shows 1
     for the only door on that device; use door.output_index for our device).
@@ -564,7 +571,7 @@ def encode_door_open_during_video(
     buf += struct.pack("<I", relay_index)
     buf += b"\xff\xff\xff\xff"
     buf += our_b
-    buf += entr_b
+    buf += (callee if callee is not None else entrance_addr).encode("ascii").ljust(10, b"\x00")[:10]
     return bytes(buf)
 
 

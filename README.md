@@ -392,3 +392,17 @@ Protocol knowledge derived from community reverse-engineering efforts:
 ## License
 
 Apache 2.0
+
+
+### Incoming-call capture improvements (1.5.13, physical validation pending)
+
+The official app's two physical calls captured on 2026-11-01 provide new
+regressions for incoming codec negotiation, talk-back startup, door routing
+and native release. Incoming audio can start after the device RTPC link is
+acknowledged while a later peer event is still acknowledged by the monitor.
+Accepted incoming calls now perform the captured release handshake, and door
+commands retain the entrance relay while addressing the incoming apartment
+callee. Manual-view messages retain their existing format.
+
+See [the capture comparison](docs/mt6741w-real-incoming-2026-11-01.md) for measured
+timings, remaining differences and the limits of offline validation.
