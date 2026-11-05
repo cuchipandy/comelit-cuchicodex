@@ -8,7 +8,7 @@ work on the **MT-6741W**. Maintained here as a fork of
 The Android Portero app is a separate project and is not distributed here.
 
 [Installation](#installation) · [Configuration](#configuration) ·
-[Changelog](CHANGELOG.md) · [Development and branches](docs/DEVELOPMENT.md)
+[Changelog](CHANGELOG.md) · [Versions and tags](docs/RELEASES.md) · [Development and branches](docs/DEVELOPMENT.md)
 
 ## Features
 
@@ -49,13 +49,12 @@ The integration communicates via the **ICONA Bridge TCP protocol** on port 64100
 2. Install **Comelit Man**
 3. Restart Home Assistant
 
-The source on `main` is newer than the inherited `v1.5.1` tag. If HACS offers
-only that older version, use the manual instructions to install the current
-source. Repository cleanup does not create a new release.
+Select **v1.5.13** for the current consolidated release. Earlier tags through
+v1.5.1 belong to the upstream history. See [versions and tags](docs/RELEASES.md).
 
 ### Manual
 
-1. Download the source from `main` and copy `custom_components/comelit_man/` to your HA `config/custom_components/` directory
+1. Download `comelit_man.zip` from the [latest release](https://github.com/cuchipandy/comelit-cuchicodex/releases/latest) and extract its contents into your HA `config/custom_components/comelit_man/` directory
 2. Restart Home Assistant
 
 ## Configuration

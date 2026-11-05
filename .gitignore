@@ -41,6 +41,7 @@ docs/*
 !docs/PROTOCOL.md
 !docs/MT6741W.md
 !docs/DEVELOPMENT.md
+!docs/RELEASES.md
 
 # Local development tools
 .tools/
