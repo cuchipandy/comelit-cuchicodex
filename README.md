@@ -1,6 +1,14 @@
 ﻿# Comelit Man
 
-Home Assistant custom component for the **Comelit 6701W** WiFi video intercom. Communicates via the ICONA Bridge TCP protocol — no cloud required.
+Local Home Assistant integration for Comelit ICONA Bridge intercoms, including
+work on the **MT-6741W**. Maintained here as a fork of
+[mnestrud/comelit-man](https://github.com/mnestrud/comelit-man).
+
+**Current integration: 1.5.13.** Use `main` for the consolidated version.
+The Android Portero app is a separate project and is not distributed here.
+
+[Installation](#installation) · [Configuration](#configuration) ·
+[Changelog](CHANGELOG.md) · [Development and branches](docs/DEVELOPMENT.md)
 
 ## Features
 
@@ -24,7 +32,8 @@ Home Assistant custom component for the **Comelit 6701W** WiFi video intercom. C
 
 | Device | Firmware | Notes |
 |--------|----------|-------|
-| Comelit 6701W | 2.x | All features — door open, video, doorbell events |
+| Comelit 6701W | 2.x | Upstream-tested: door open, video, doorbell events |
+| Comelit MT-6741W | Installation-specific | Video, door opening and two-way speech tested on this installation; quiet-speech filtering remains under investigation. |
 
 **Likely compatible (same ICONA Bridge protocol):**
 - Other Comelit WiFi video door panels using the ICONA Bridge protocol on port 64100
@@ -36,13 +45,17 @@ The integration communicates via the **ICONA Bridge TCP protocol** on port 64100
 
 ### HACS (Recommended)
 
-1. Add this repository as a custom repository in HACS
+1. Add `https://github.com/cuchipandy/comelit-cuchicodex` as a custom repository in HACS (category: Integration)
 2. Install **Comelit Man**
 3. Restart Home Assistant
 
+The source on `main` is newer than the inherited `v1.5.1` tag. If HACS offers
+only that older version, use the manual instructions to install the current
+source. Repository cleanup does not create a new release.
+
 ### Manual
 
-1. Copy the `custom_components/comelit_man/` folder to your HA `config/custom_components/` directory
+1. Download the source from `main` and copy `custom_components/comelit_man/` to your HA `config/custom_components/` directory
 2. Restart Home Assistant
 
 ## Configuration
@@ -71,78 +84,19 @@ After setup, you can configure the integration via **Settings → Integrations �
 
 Changing this setting reloads the integration automatically.
 
-### Maximum video quality and two-way audio (MT-6741W)
+### MT-6741W video and audio
 
-Choose **Configure → Video quality → Maximum (1024x608, 25 fps)** to request
-these native stream parameters. They are based on the Comelit app settings
-reported for the MT-6741W. Live testing on one MT-6741W on 2026-10-28
-received **640x240 at approximately 25 fps**, not 1024x608. The requested
-profile is not a guarantee of native camera resolution. The profile
-is used for incoming calls, manual viewing and call renewals. Both resolution fields are set to 1024x608, matching the app screenshot.
-Maximum also sends the app's captured 1000-kbps HD setting. Decoding a capture
-of the official app on this installation likewise produced 640x240, including
-the segments with HD enabled.
-Legacy profiles retain the captured secondary 320x240 fields. H.264 is relayed without upscaling or
-transcoding, with a maximum 1400-byte payload when the RTSP server packetizes
-NAL units. In pass-through mode the original device packet boundaries are kept;
-the reported app/device limit is also 1400 bytes. Compatible remains the default
-(800x480 outbound, 320x240 inbound, 16 fps). If Maximum produces no picture,
-select Compatible again.
+Select the video profile in **Configure → Video quality**. The 1024x608 / 25 fps
+profile is a request, not verified native HD: both this integration and the
+inspected official app capture received **640x240**.
 
-For talking back, use **comelit-doorbell-card**, configure `answer_entity`,
-open Home Assistant over **HTTPS** (local TLS or a remote HTTPS URL), and allow
-microphone access. Press **Answer** to enable the microphone, either while
-viewing the camera manually or during an incoming doorbell call. The card
-negotiates G.711 audio, enables the microphone when answered, and restores it
-on reconnection. A permission refusal now has its own message. HTTP still allows
-video and listening, but browser microphone capture requires a secure origin.
-**MT-6741W manual viewing now enables entrance audio without a doorbell ring.**
-The microphone remains controlled by the card's Answer/mute controls. Live
-testing confirmed incoming PCMA and outgoing backchannel packet flow; hearing
-and microphone intelligibility still need an on-site check. The presence of an
-RTSP audio track alone does not prove entrance audio is arriving.
-After closing a manual session that used audio, the integration keeps a
-**20-second interval before starting another manual session**. Live MT-6741W
-tests passed with this interval; faster reopen could negotiate successfully
-but deliver no audio. An early reopen waits for the remaining interval, and
-Stop cancels that pending start. Incoming doorbell calls use their own flow.
+Manual viewing can receive entrance audio without a ring. Answering enables
+talk-back; a browser microphone requires HTTPS and permission. Manual
+microphone gain is applied in HA and can be controlled by Portero. The Android
+app's echo, noise suppression and automatic gain controls are separate.
 
-Download the integration diagnostics while the call is active to compare
-`requested_quality` with `received_dimensions`. The latter is measured from
-decoded frames, not copied from the requested profile. Check `audio_rx_packets`
-(entrance audio), `mic_rx_packets` (go2rtc → integration), and `mic_tx_frames`
-(integration → entrance). Increasing counters verify packet flow; confirm
-intelligible sound in both directions with someone at the entrance. Check
-mute/unmute and repeat after 30 seconds to cover call renewal.
-`video_rx_packets` and `last_video_packet_age_s` distinguish fresh video from
-a stale last JPEG. The integration restarts a silent media session after
-8 seconds when the device supplies no CALL_END. During normal renewal, RTSP
-silence keeps go2rtc connected while video signaling runs.
-
-Developer checks: `node --test tests/test_doorbell_card.cjs` covers permission,
-answer timing, reconnection, cancellation and codec selection. Run the Python
-suite for signaling, RTP, RTSP and integration regressions.
-
-### MT-6741W requested and received resolution
-
-The inspected official-app capture requests 1024x608 for both resolution bounds,
-25 fps and 1000 kbps in its video configuration. Its H.264 stream nevertheless
-decodes to 640x240, matching the integration's observed output. The captured SPS
-is `6742001fe90140fd00b1021280`; the decoder reports no sample-aspect-ratio value.
-These observations apply to that captured session and do not establish the
-hardware's maximum resolution. Requesting a larger frame does not guarantee
-that the entrance or monitor sends it. Upscaling the image would not add detail.
-
-Presentation is separate: a 640x240 frame must not be cropped to fill a 4:3
-viewport. Portero 0.2.15 deliberately stretches the complete image into a fixed
-4:3 viewport, retaining both sides, and keeps its last image during
-preview-to-conversation negotiation. This changes presentation, not source resolution.
-
-Comelit Man 1.5.12 starts consuming inbound TCP media immediately after RTPC2
-opens, before video configuration and its retransmit. Portero keeps the incoming
-session receive-only, retries WebRTC failures while ringing, waits beyond the
-old 12-second cutoff, and refreshes a JPEG fallback while the live decoder starts.
-Answering remains a separate user action; preview does not activate the microphone.
+See [MT-6741W device notes](docs/MT6741W.md) for resolution findings, diagnostics,
+manual-session limits and incoming-call handling.
 
 ## Known limitations
 
@@ -363,24 +317,12 @@ Then restart HA. Debug logs include TCP connection events, channel opens, keepal
 
 ## Changelog
 
-Full history: [CHANGELOG.md](CHANGELOG.md). Recent highlights:
+Full history: [CHANGELOG.md](CHANGELOG.md).
 
-### 1.5.0
-- **Dedicated device user** — opt-in during setup: the integration creates its own account on the intercom and mints its own token, so Home Assistant and the Comelit app no longer kick each other off a shared identity
-- **Lock entities, ring sensors, per-caller doorbell entities** — doors are also locks (HomeKit/voice), last-ring + ring-count sensors restore across restarts, and each call origin gets its own event entity
-- **Broader device support** — apartment-block numeric addresses, kit-mode dropped prefixes, floor-call origin tag
-- **Fixed token auto-extraction** — the backup scan matched `facerecognitionusers.cfg` instead of `users.cfg`, breaking setup with a blank token field
-
-### 1.4.0
-- **Two-way audio validated end-to-end** — talk-back from the doorbell card to the entrance speaker, with transport-matched mic TX, 20 ms re-chunking, and PCMU→PCMA conversion
-- **Doorbell card is a full answer station** — built-in WebRTC player over HA's native signaling; works locally and remotely (Nabu Casa TURN); mic on HTTPS origins
-- **Rings during an active call fire events; real missed-call detection; video ends when nobody is watching**
-
-### 1.2.0 and earlier
-- 1.2.0 — inbound video auto-starts on ring; audio sender wired to the answer flow
-- 1.1.x — inbound call answer, `ring` standard event type, go2rtc backchannel groundwork
-- 1.0.x — first stable release; quality-scale hardening, strict typing, coverage
-- 0.1.4 — **breaking:** entity IDs derive from the integration title (see [CHANGELOG.md](CHANGELOG.md#014) if upgrading from pre-1.0)
+- **1.5.13:** incoming audio startup and native call release.
+- **1.5.12:** earlier incoming media consumption for receive-only previews.
+- **1.5.11:** live microphone gain control without reloading HA.
+- **1.5.8–1.5.10:** incoming UDP audio, listener recovery and door-release resilience.
 
 ## Acknowledgments
 
@@ -392,18 +334,3 @@ Protocol knowledge derived from community reverse-engineering efforts:
 ## License
 
 Apache 2.0
-
-
-### Incoming-call capture improvements (1.5.13, physical validation pending)
-
-The official app's two physical calls captured on 2026-11-01 provide new
-regressions for incoming codec negotiation, talk-back startup, door routing
-and native release. Incoming audio can start after the device RTPC link is
-acknowledged while a later peer event is still acknowledged by the monitor.
-Accepted incoming calls now perform the captured release handshake, and door
-commands retain the entrance relay while addressing the incoming apartment
-callee. Manual-view messages retain their existing format.
-
-See [the capture-derived tests](tests/test_mt6741w_incoming_capture.py) for the
-control messages and regressions. The detailed PCAP comparison remains local,
-following the repository policy for protocol investigations.

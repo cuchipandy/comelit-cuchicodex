@@ -39,5 +39,10 @@ memory/protocol_reference.md
 
 docs/*
 !docs/PROTOCOL.md
+!docs/MT6741W.md
+!docs/DEVELOPMENT.md
+
+# Local development tools
+.tools/
 
 .claude

@@ -107,9 +107,7 @@ async def test_mic_starts_after_device_link_without_waiting_for_late_peer():
     session._inbound_device_rtpc = Channel("RTPC_DEVICE", ChannelType.UAUT, 0, server_channel_id=0xCDDE)
     session._inbound_device_rtpc.open_event.set()
     session._rtp_receiver.start_audio_sender = MagicMock()
-    link = bytes.fromhex(
-        "4018022c0021000a0011180200000000decd0000ffffffff5342303030303034000053423030303030343100"
-    )
+    link = bytes.fromhex("4018022c0021000a0011180200000000decd0000ffffffff5342303030303034000053423030303030343100")
 
     async def send(_channel, body):
         if body[6:10] == b"\x00\x02\x00\x0c":

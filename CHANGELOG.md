@@ -1,5 +1,41 @@
 # Changelog
 
+## Repository maintenance — 2026-11-05
+
+- Consolidate this fork on main and retain the three MT-6741W work branches.
+- Separate device findings and development guidance from installation instructions.
+- Point documentation and issue links to this maintained fork.
+
+## 1.5.13 — 2026-11-01
+
+- Match incoming codec negotiation to the official physical-call capture.
+- Start talk-back after the device RTPC link ACK without waiting for a later peer.
+- Use the incoming apartment callee for door commands, retaining the entrance relay.
+- Release answered incoming calls with the captured native hangup sequence.
+
+## 1.5.12 — 2026-10-30
+
+- Consume incoming TCP media as soon as RTPC2 opens, before video configuration.
+- Document measured 640x240 video despite a requested 1024x608 profile.
+
+## 1.5.11 — 2026-10-30
+
+- Expose microphone gain as a camera service for live control from Portero.
+- Persist the gain without reloading the integration.
+
+## 1.5.10 — 2026-10-29
+
+- Keep active calls alive after door release and recover interrupted media.
+- Add selectable microphone gain on the outgoing G.711 backchannel.
+
+## 1.5.9 — 2026-10-29
+
+- Restore VIP registration when returning from media sessions.
+
+## 1.5.8 — 2026-10-29
+
+- Correct incoming UDP audio reception on RTPC1.
+
 ## 1.5.7 — 2026-10-29
 
 - Fail promptly on an explicit manual-session rejection instead of continuing
