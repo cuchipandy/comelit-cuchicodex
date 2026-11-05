@@ -27,6 +27,16 @@ Create future changes on `codex/` branches and merge via PR.
 Inherited feature branches have been removed from GitHub. A local Git bundle
 was retained before deletion. Existing tags and commit history remain intact.
 
+## Tags and releases
+
+Use annotated `vX.Y.Z` tags matching `manifest.json`, with the version's
+changelog as the tag message. Never move a published tag to another commit.
+The current release includes `comelit_man.zip`, containing the integration
+files at its root. The ZIP can be used for manual installation or HACS.
+
+See [versions and tag mapping](RELEASES.md). Historical development dates are
+distinct from the date the retrospective tags and releases were published.
+
 ## Checks
 
 Use Python 3.13 or later and the dependencies in the validation workflow.

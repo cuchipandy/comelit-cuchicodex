@@ -5,6 +5,8 @@
 - Consolidate this fork on main and retain the three MT-6741W work branches.
 - Separate device findings and development guidance from installation instructions.
 - Point documentation and issue links to this maintained fork.
+- Add annotated tags for 1.5.2–1.5.13 and document their source commits.
+- Publish the consolidated 1.5.13 release with an installable integration ZIP.
 
 ## 1.5.13 — 2026-11-01
 
