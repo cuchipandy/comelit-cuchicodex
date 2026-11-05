@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_PORT, CONF_TOKEN
+from homeassistant.helpers import selector
 
 if TYPE_CHECKING:
     from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
@@ -19,6 +20,7 @@ from .const import (
     CONF_CREATE_USER,
     CONF_ENABLE_NOTIFICATIONS,
     CONF_HTTP_PORT,
+    CONF_INCOMING_CALL_SENSOR,
     CONF_MICROPHONE_GAIN,
     CONF_VIDEO_QUALITY,
     DEFAULT_HTTP_PORT,
@@ -353,6 +355,10 @@ class ComelitLocalOptionsFlow(config_entries.OptionsFlowWithReload):
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_ENABLE_NOTIFICATIONS, default=current): bool,
+                    vol.Optional(
+                        CONF_INCOMING_CALL_SENSOR,
+                        description={"suggested_value": self._config_entry.options.get(CONF_INCOMING_CALL_SENSOR, "")},
+                    ): selector.EntitySelector(selector.EntitySelectorConfig(domain="binary_sensor")),
                     vol.Required(
                         CONF_VIDEO_QUALITY,
                         default=self._config_entry.options.get(CONF_VIDEO_QUALITY, DEFAULT_VIDEO_QUALITY),

@@ -169,6 +169,8 @@ def _make_coordinator(*, with_client: bool = False) -> ComelitLocalCoordinator:
     coordinator._last_ring_mono = None
     coordinator._inbound_answered = False
     coordinator._pending_inbound_ring = None
+    coordinator._external_ring_mono = None
+    coordinator._video_stop_generation = 0
     coordinator.async_request_refresh = AsyncMock()
     coordinator.async_set_updated_data = MagicMock()
     coordinator.logger = MagicMock()
@@ -2103,3 +2105,146 @@ async def test_health_refresh_and_user_start_do_not_reconnect_same_identity_twic
         assert await asyncio.wait_for(viewer, 1) is session
         assert await asyncio.wait_for(health, 1) is coord._config
     coord._reconnect.assert_awaited_once()
+
+
+async def test_external_physical_ring_blocks_manual_fallback_but_expiry_allows_it():
+    from custom_components.comelit_man.exceptions import VideoCallError
+
+    coord = _make_coordinator(with_client=True)
+    coord._external_ring_mono = 100
+    coord.async_start_video = AsyncMock()
+    with patch("custom_components.comelit_man.coordinator.time.monotonic", return_value=106):
+        with pytest.raises(VideoCallError) as error:
+            await coord.async_answer_inbound()
+        assert error.value.translation_key == "incoming_session_unavailable"
+        coord.async_start_video.assert_not_awaited()
+    with patch("custom_components.comelit_man.coordinator.time.monotonic", return_value=150):
+        await coord.async_answer_inbound()
+    coord.async_start_video.assert_awaited_once_with(by_user=True)
+
+
+async def test_manual_start_during_external_ring_never_opens_a_video_session():
+    from custom_components.comelit_man.exceptions import VideoCallError
+
+    coord = _make_coordinator(with_client=True)
+    coord._external_ring_mono = 100
+    with (
+        patch("custom_components.comelit_man.coordinator.time.monotonic", return_value=101),
+        patch("custom_components.comelit_man.coordinator.VideoCallSession") as factory,
+        pytest.raises(VideoCallError),
+    ):
+        await coord.async_start_video(by_user=True)
+    factory.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "reason", ["native", "video", "stopped", "superseded", "expired", "disabled", "disconnected", "missing"]
+)
+async def test_external_recovery_respects_native_session_and_lifecycle(reason):
+    coord = _make_coordinator(with_client=True)
+    coord._external_ring_mono = 100
+    coord._ensure_vip_listener = AsyncMock()
+    coord._reconnect = AsyncMock()
+    if reason == "native":
+        coord._last_ring_mono = 100.1
+    elif reason == "video":
+        coord._video_session = MagicMock(active=True)
+    elif reason == "stopped":
+        coord.request_video_stop()
+    elif reason == "superseded":
+        coord._external_ring_mono = 101
+    elif reason == "disabled":
+        coord.config_entry.options["enable_notifications"] = False
+    elif reason == "disconnected":
+        coord._client.connected = False
+    elif reason == "missing":
+        coord._client = None
+    with (
+        patch("custom_components.comelit_man.coordinator.asyncio.sleep", new_callable=AsyncMock),
+        patch(
+            "custom_components.comelit_man.coordinator.time.monotonic", return_value=150 if reason == "expired" else 101
+        ),
+    ):
+        await coord._recover_external_ring(100, 0)
+    coord._ensure_vip_listener.assert_not_awaited()
+    assert coord._reconnect.await_count == (1 if reason == "disconnected" else 0)
+
+
+async def test_external_ring_repairs_registration_then_answers_only_native_session():
+    coord = _make_coordinator(with_client=True)
+    coord._external_ring_mono = 100
+    native = MagicMock(active=True)
+    native.answer_inbound = AsyncMock()
+
+    async def recover(*, force):
+        assert force is True
+        coord._video_session = native
+
+    coord._ensure_vip_listener = AsyncMock(side_effect=recover)
+    with (
+        patch("custom_components.comelit_man.coordinator.asyncio.sleep", new_callable=AsyncMock),
+        patch("custom_components.comelit_man.coordinator.time.monotonic", return_value=101),
+    ):
+        await coord._recover_external_ring(100, 0)
+        await coord.async_answer_inbound()
+    native.answer_inbound.assert_awaited_once()
+    assert coord._inbound_answered is True
+    assert coord._external_ring_mono is None
+
+
+async def test_external_ring_does_not_replace_an_existing_shared_media_session():
+    coord = _make_coordinator(with_client=True)
+    existing = MagicMock(active=True)
+    coord._video_session = existing
+    coord._external_ring_mono = 100
+    with patch("custom_components.comelit_man.coordinator.time.monotonic", return_value=101):
+        assert await coord.async_start_video(by_user=True) is existing
+    existing.stop.assert_not_called()
+
+
+async def test_force_recovery_reinitializes_even_a_running_listener_before_replacing_it():
+    coord = _make_coordinator(with_client=True)
+    old = MagicMock(is_running=True)
+    old.stop = AsyncMock()
+    coord._vip_listener = old
+    channel = MagicMock(is_open=True)
+    coord._client.get_channel.return_value = channel
+    new = MagicMock()
+    new.start = AsyncMock()
+    with (
+        patch("custom_components.comelit_man.coordinator.ctpp_init_sequence", new_callable=AsyncMock) as init,
+        patch("custom_components.comelit_man.coordinator.VipEventListener", return_value=new),
+    ):
+        await coord._ensure_vip_listener(force=True)
+    old.stop.assert_awaited_once()
+    init.assert_awaited_once()
+    new.start.assert_awaited_once()
+    assert coord._vip_listener is new
+
+
+def test_external_sensor_subscription_is_optional_and_unsubscribes_on_unload():
+    coord = _make_coordinator()
+    with patch("custom_components.comelit_man.coordinator.async_track_state_change_event") as track:
+        coord.async_watch_incoming_call_sensor()
+        track.assert_not_called()
+        coord.config_entry.options["incoming_call_sensor"] = "binary_sensor.physical_ring"
+        coord.async_watch_incoming_call_sensor()
+        track.assert_called_once_with(coord.hass, "binary_sensor.physical_ring", coord._on_external_ring)
+        coord.config_entry.async_on_unload.assert_called_once_with(track.return_value)
+
+
+def test_external_sensor_only_triggers_on_a_new_on_edge():
+    coord = _make_coordinator()
+    for old, new in [("off", "off"), ("on", "on"), ("on", "unavailable")]:
+        coord._on_external_ring(MagicMock(data={"old_state": MagicMock(state=old), "new_state": MagicMock(state=new)}))
+    coord.config_entry.async_create_background_task.assert_not_called()
+    coord._on_external_ring(MagicMock(data={"old_state": MagicMock(state="off"), "new_state": MagicMock(state="on")}))
+    coord.config_entry.async_create_background_task.assert_called_once()
+    assert coord._external_ring_mono is not None
+
+
+async def test_explicit_stop_cancels_external_ring_recovery():
+    coord = _make_coordinator(with_client=True)
+    coord._external_ring_mono = 100
+    await coord.async_stop_video()
+    assert coord._external_ring_mono is None

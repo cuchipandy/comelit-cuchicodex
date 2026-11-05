@@ -1130,3 +1130,13 @@ async def test_bad_event_does_not_kill_listener_and_closed_channel_is_detected()
     finally:
         await listener.stop()
     assert not listener.is_running
+
+
+async def test_code8_refusal_is_not_a_door_opened_event():
+    listener = _make_listener()
+    # Signaling observed after the rejected manual fallback on November 5.
+    frame = bytes.fromhex("601882d56aee0003000e0800ffffffff5342313030303031000053423030303030343200")
+    await listener._process_message(frame)
+    listener._callback.assert_not_called()
+    listener._client.send_binary.assert_not_awaited()
+    assert listener.last_message_at is not None

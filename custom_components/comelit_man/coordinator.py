@@ -15,10 +15,11 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.event import EventStateChangedData, async_track_state_change_event
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .auth import authenticate
@@ -27,6 +28,7 @@ from .client import IconaBridgeClient
 from .config_reader import get_device_config
 from .const import (
     CONF_ENABLE_NOTIFICATIONS,
+    CONF_INCOMING_CALL_SENSOR,
     CONF_MICROPHONE_GAIN,
     CONF_VIDEO_QUALITY,
     DEFAULT_MICROPHONE_GAIN,
@@ -36,7 +38,7 @@ from .const import (
 )
 from .ctpp import _CTR_INCR_BOTH, ctpp_init_sequence
 from .door import open_door
-from .exceptions import AuthenticationError, DoorOpenError
+from .exceptions import AuthenticationError, DoorOpenError, VideoCallError
 from .models import DeviceConfig, Door, PushEvent
 from .push import register_push, send_push_keepalive
 from .rtsp_server import LocalRtspServer
@@ -54,6 +56,7 @@ RING_DEDUP_WINDOW = 120.0
 # a ring this recently; otherwise it is video-teardown / CTPP-init tail.
 MISSED_CALL_WINDOW = 45.0
 MANUAL_AUDIO_REOPEN_DELAY = 20.0  # MT-6741W live-tested interval after an audio call
+EXTERNAL_RING_GRACE = 0.75  # Give the normal VIP path first chance to deliver the ring.
 
 
 class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
@@ -123,6 +126,7 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
         # cover the standard flow because passive video holds the CTPP
         # channel far past the 45s window).
         self._pending_inbound_ring: str | None = None
+        self._external_ring_mono: float | None = None
         # Use an insertion-ordered dict to track callbacks (value is always None).
         # This avoids ValueError on removal and preserves iteration order.
         self._push_callbacks: dict[Callable[[PushEvent], None], None] = {}
@@ -454,6 +458,7 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
                 _LOGGER.debug("Reusing active HA video session for another viewer")
                 return existing
 
+            self._raise_if_external_ring_pending()
             self._video_stopped_by_user = False
             await self._async_stop_video_locked()
             reopen_delay = self._video_reopen_after - time.monotonic()
@@ -559,6 +564,63 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
             _LOGGER.debug("Auto-restart skipped: %s", err)
         except Exception:
             _LOGGER.warning("Auto-restart failed", exc_info=True)
+
+    @callback
+    def async_watch_incoming_call_sensor(self) -> None:
+        """Use an explicitly selected physical-ring sensor as a recovery hint."""
+        sensor = self.config_entry.options.get(CONF_INCOMING_CALL_SENSOR)
+        if sensor:
+            _LOGGER.info("Watching external incoming-call sensor: %s", sensor)
+            self.config_entry.async_on_unload(async_track_state_change_event(self.hass, sensor, self._on_external_ring))
+
+    @callback
+    def _on_external_ring(self, event: Event[EventStateChangedData]) -> None:
+        state = event.data.get("new_state")
+        old = event.data.get("old_state")
+        if state is None or state.state != "on" or (old is not None and old.state == "on"):
+            return
+        ring_at = time.monotonic()
+        self._external_ring_mono = ring_at
+        generation = self._video_stop_generation
+        _LOGGER.info("External incoming ring detected; checking native call registration")
+        self.config_entry.async_create_background_task(
+            self.hass, self._recover_external_ring(ring_at, generation), "comelit-incoming-recovery"
+        )
+
+    def _external_ring_pending(self) -> bool:
+        ring_at = getattr(self, "_external_ring_mono", None)
+        return ring_at is not None and time.monotonic() - ring_at < MISSED_CALL_WINDOW
+
+    async def _recover_external_ring(self, ring_at: float, generation: int) -> None:
+        """Repair only an idle registration; never fabricate a call or reset live media."""
+        await asyncio.sleep(EXTERNAL_RING_GRACE)
+        async with self._video_start_lock:
+            if (
+                self._external_ring_mono != ring_at
+                or not self._external_ring_pending()
+                or self._video_stop_generation != generation
+                or self._video_session is not None
+                or (self._last_ring_mono is not None and self._last_ring_mono >= ring_at - 2)
+            ):
+                return
+            if not self.config_entry.options.get(CONF_ENABLE_NOTIFICATIONS, True):
+                _LOGGER.warning("Cannot recover incoming call with Comelit notifications disabled")
+                return
+            if not self._client or not self._config:
+                return
+            _LOGGER.warning("External ring without native session; renewing HA's VIP registration")
+            try:
+                if not self._client.connected:
+                    await self._reconnect()
+                else:
+                    await self._ensure_vip_listener(force=True)
+            except Exception:
+                _LOGGER.exception("Incoming registration recovery failed")
+
+    def _raise_if_external_ring_pending(self) -> None:
+        if self._external_ring_pending():
+            _LOGGER.warning("Incoming session unavailable; refusing competing manual setup")
+            raise VideoCallError(translation_domain=DOMAIN, translation_key="incoming_session_unavailable")
 
     def _on_inbound_ring(self, entrance_addr: str, ring_ts: int) -> None:
         """Called by VIP listener when device initiates a ring (PREFIX_CALL_INIT).
@@ -739,10 +801,12 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
                 await session.answer_inbound()
                 self._inbound_answered = True
                 self._pending_inbound_ring = None
+                self._external_ring_mono = None
                 return
 
         # No physical ring exists (for example, a Tasker intent test). Do not
         # keep the lock here: async_start_video acquires it itself.
+        self._raise_if_external_ring_pending()
         await self.async_start_video(by_user=True)
 
     async def _register_go2rtc_stream(self) -> None:
@@ -855,7 +919,7 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
                 # dead socket and set client.connected = False within seconds,
                 # which the coordinator's health-check will pick up.
 
-    async def _ensure_vip_listener(self) -> None:
+    async def _ensure_vip_listener(self, *, force: bool = False) -> None:
         """Start VIP listener if enabled and not already running.
 
         An open channel can still be in the previous call's state. Register
@@ -866,11 +930,11 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
             return
         if not self.config_entry.options.get(CONF_ENABLE_NOTIFICATIONS, True):
             return
-        if self._vip_listener and self._vip_listener.is_running:
+        if self._vip_listener and self._vip_listener.is_running and not force:
             return
         try:
             if self._vip_listener:
-                _LOGGER.warning("VIP listener stopped or channel closed — restoring HA's registration")
+                _LOGGER.warning("Restoring HA's VIP registration (forced=%s)", force)
                 await self._vip_listener.stop()
                 self._vip_listener = None
             ctpp = self._client.get_channel("CTPP")
@@ -904,6 +968,7 @@ class ComelitLocalCoordinator(DataUpdateCoordinator[DeviceConfig]):
 
     async def async_stop_video(self) -> None:
         """Serialize teardown with startup and listener repair for HA's identity."""
+        self._external_ring_mono = None
         async with self._video_start_lock:
             await self._async_stop_video_locked(restore_listener=True)
 

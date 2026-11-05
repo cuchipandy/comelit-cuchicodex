@@ -58,12 +58,14 @@
         "data": {
           "enable_notifications": "Enable doorbell notifications",
           "video_quality": "Video quality",
-          "microphone_gain": "Microphone amplification (phone to entrance)"
+          "microphone_gain": "Microphone amplification (phone to entrance)",
+          "incoming_call_sensor": "External incoming-call sensor (optional)"
         },
         "data_description": {
           "enable_notifications": "Receive doorbell ring and missed call events from the intercom",
           "video_quality": "Compatible preserves existing resolutions. Maximum requests 1024x608 at 25 fps (reported by the Comelit app for MT-6741W); actual output depends on panel/firmware. Return to Compatible if video stops.",
-          "microphone_gain": "Boost only the microphone sent to the entrance. Original preserves the signal; +6 dB doubles its amplitude. Reduce the gain if speech distorts."
+          "microphone_gain": "Boost only the microphone sent to the entrance. Original preserves the signal; +6 dB doubles its amplitude. Reduce the gain if speech distorts.",
+          "incoming_call_sensor": "Select a physical ring sensor, such as ESPHome Simplebus. If it rings without a native Comelit session, refresh registration and prevent a competing manual call. Keep Comelit notifications enabled. Leave empty when no external sensor is available."
         }
       }
     }
@@ -157,10 +159,13 @@
       "message": "Video channel not established \u2014 device did not respond"
     },
     "video_session_refused": {
-      "message": "The intercom refused this session (code {code}). Another manual view may already be active."
+      "message": "The intercom refused this session (code {code}). A physical call or manual view may be active, or its incoming session may not have reached Home Assistant."
     },
     "video_no_media": {
       "message": "The intercom is not sending video or audio. Close other manual views and try again."
+    },
+    "incoming_session_unavailable": {
+      "message": "A physical ring was detected, but its Comelit session is not available yet. Registration recovery has been requested. Retry while the entrance is still ringing; no manual call has been started."
     }
   },
   "issues": {

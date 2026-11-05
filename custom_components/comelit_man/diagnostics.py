@@ -37,6 +37,11 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Comelit
             "connected": bool(coordinator._client and coordinator._client.connected),
             "connection_lost": coordinator._connection_lost,
             "vip_listener_active": bool(coordinator._vip_listener and coordinator._vip_listener.is_running),
+            "last_vip_message_age_s": (
+                round(time.monotonic() - coordinator._vip_listener.last_message_at, 2)
+                if coordinator._vip_listener and isinstance(coordinator._vip_listener.last_message_at, (int, float))
+                else None
+            ),
         },
         "video": {
             "requested_quality": entry.options.get(CONF_VIDEO_QUALITY, DEFAULT_VIDEO_QUALITY),
