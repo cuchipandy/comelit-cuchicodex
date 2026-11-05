@@ -9,6 +9,7 @@ CONF_ENABLE_NOTIFICATIONS = "enable_notifications"
 CONF_VIDEO_QUALITY = "video_quality"
 DEFAULT_VIDEO_QUALITY = "compatible"
 CONF_MICROPHONE_GAIN = "microphone_gain"
+CONF_INCOMING_CALL_SENSOR = "incoming_call_sensor"
 DEFAULT_MICROPHONE_GAIN = "1"
 MICROPHONE_GAIN_PROFILES = {
     "1": "Original (0 dB)",

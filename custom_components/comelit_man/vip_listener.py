@@ -164,6 +164,7 @@ class VipEventListener:
         # previous ACK was not accepted.
         self._last_seen_ts: dict[tuple[int, int], tuple[int, float]] = {}
         self._retransmit_window: float = 10.0  # seconds
+        self.last_message_at: float | None = None
 
     @property
     def is_running(self) -> bool:
@@ -230,9 +231,17 @@ class VipEventListener:
             return
 
         prefix = msg["prefix"]
+        self.last_message_at = time.monotonic()
         action = msg["action"]
         ts = msg["timestamp"]
         addresses = msg["addresses"]
+
+        # Refusal frames share the FSM action used by OUT_INITIATED, but
+        # carry flags 0x000E and a LE16 error code. They are not relay events.
+        if prefix == PREFIX_VIP_EVENT and action == ACTION_DOOR_OPENED and msg.get("flags") == 0x000E:
+            if len(data) >= 12:
+                _LOGGER.warning("VIP call refusal received (code=%d)", struct.unpack_from("<H", data, 10)[0])
+            return
 
         # Detect retransmits: device resending the same (prefix, action, ts)
         # means our previous ACK was not accepted.

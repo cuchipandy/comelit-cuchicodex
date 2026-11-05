@@ -19,9 +19,11 @@
 | `codex/hd-video-two-way-audio` | Earlier MT-6741W checkpoint through 1.5.11 |
 | `codex/video-framing-diagnostics` | Preview and resolution checkpoint through 1.5.12 |
 | `codex/inbound-call-release` | Incoming-call handling, 1.5.13 and repository maintenance |
+| `codex/incoming-session-recovery` | 1.5.14 development: external physical-ring hint and native session recovery |
 
-The three work branches are successive development stages, not separate products.
-Their useful changes are consolidated into `main`. Keep them as comparison points.
+The first three work branches are historical development stages, not separate products.
+Their changes are consolidated into `main`; the recovery branch contains new work.
+Keep the earlier branches as comparison points.
 Create future changes on `codex/` branches and merge via PR.
 
 Inherited feature branches have been removed from GitHub. A local Git bundle

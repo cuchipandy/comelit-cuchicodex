@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.5.14 — development, 2026-11-05
+
+- Add an optional external incoming-call binary sensor (for example ESPHome
+  Simplebus). A new ring without native media refreshes HA's VIP registration
+  after a short grace period, while preserving any active media session.
+- Reject manual startup/fallback while that physical ring is pending instead
+  of competing with it. Stop cancels the recovery hint; a native answer clears it.
+- Do not publish a call-refusal frame (flags 0x000E) as a door-opened event.
+- Expose the age of the last parsed VIP message in diagnostics. A live TCP
+  keepalive alone does not establish that call events are being delivered.
+- The recovery is regression-tested; recovering a real physical ring still
+  requires an on-site call. No native session is synthesized from the sensor.
+
 ## Repository maintenance — 2026-11-05
 
 - Consolidate this fork on main and retain the three MT-6741W work branches.

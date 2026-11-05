@@ -119,6 +119,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ComelitLocalConfigEntry)
         raise ConfigEntryNotReady(f"Unexpected error setting up Comelit device: {err}") from err
 
     entry.runtime_data = coordinator
+    coordinator.async_watch_incoming_call_sensor()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
