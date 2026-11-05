@@ -98,10 +98,10 @@ class FakeComelitDevice:
     """In-process ICONA Bridge server for integration tests.
 
     Responds to channel opens, auth/config JSON, and the binary CTPP
-    signaling sequence used by VideoCallSession. After the first HANGUP/ZERO
-    (which signals "call accepted"), schedules a CALL_END after 200 ms to
+    signaling sequence used by VideoCallSession. After the first extended manual-view peer
+    (which activates audio), schedules a CALL_END after 200 ms to
     trigger _inline_reestablish. Sets renewal_done when it receives the
-    renewal answer_peer (0x1860 with ACTION_PEER at body[8:10]).
+    new-call answer_peer (0x1840 with ACTION_PEER at body[8:10]).
     """
 
     def __init__(self) -> None:
@@ -117,9 +117,9 @@ class FakeComelitDevice:
         # State counters for dispatching the correct response per phase
         self._ctpp_init_count: int = 0
         self._video_config_count: int = 0
-        self._hangup_zero_count: int = 0
+        self._manual_peer_count: int = 0
 
-        # Set when the renewal answer_peer (0x1860/0x0070) is received
+        # Set when the new-call answer_peer (0x1840/0x0070) is received
         self.renewal_done: asyncio.Event = asyncio.Event()
 
     @property
@@ -265,8 +265,9 @@ class FakeComelitDevice:
                 await self._on_codec_ack()
             elif action == 0x001A:  # VIDEO_CONFIG
                 await self._on_video_config()
-            elif action == 0x0000:  # HANGUP/ZERO (call accepted signal)
-                await self._on_hangup_zero()
+            elif len(body) >= 10 and body[8:10] == b"\x00\x70":
+                assert len(body) == 48 and body[22:24] == b"\x00\x00"
+                await self._on_manual_peer()
             # 0x000A (rtpc_link from client), other → ignore
 
         elif prefix == 0x1860 and len(body) >= 10:
@@ -315,11 +316,13 @@ class FakeComelitDevice:
         self._write(_device_rtpc_open(dev_req_id))
         await self._flush()
 
-    async def _on_hangup_zero(self) -> None:
-        """After the first HANGUP/ZERO, schedule a CALL_END to trigger renewal."""
-        self._hangup_zero_count += 1
-        if self._hangup_zero_count == 1:
+    async def _on_manual_peer(self) -> None:
+        """After the first manual-view peer, force a lease renewal."""
+        self._manual_peer_count += 1
+        if self._manual_peer_count == 1:
             asyncio.create_task(self._send_call_end(delay=0.2))
+        else:
+            self.renewal_done.set()
 
     async def _send_call_end(self, delay: float) -> None:
         await asyncio.sleep(delay)
@@ -382,9 +385,9 @@ async def test_video_flow_start_renewal_stop():
             await session.start()
             assert session.active is True
 
-            # FakeDevice sends CALL_END 200 ms after the first HANGUP/ZERO.
+            # FakeDevice sends CALL_END 200 ms after the first manual-view peer.
             # _inline_reestablish completes and sets renewal_done via the
-            # renewal answer_peer (0x1860/0x0070).
+            # new-call answer_peer (0x1840/0x0070).
             await asyncio.wait_for(device.renewal_done.wait(), timeout=10.0)
             assert session.active is True
 
@@ -444,7 +447,7 @@ async def test_video_flow_session_stops_cleanly_without_renewal():
             assert session.active is True
 
             # Stop before CALL_END fires (it is scheduled 200 ms after
-            # HANGUP/ZERO — stop immediately).
+            # manual-view peer — stop immediately).
             await session.stop()
 
         assert session.active is False

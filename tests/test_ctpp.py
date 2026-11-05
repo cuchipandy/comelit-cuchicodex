@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import struct
 from unittest.mock import AsyncMock, MagicMock
 
@@ -163,3 +164,16 @@ class TestCtppInitSequence:
         )
 
         assert client.read_response.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prefix,action", [(0x18C0, 0x0028), (0x1860, 0x0001)])
+async def test_registration_does_not_consume_an_interleaved_incoming_ring(prefix, action):
+    ring = struct.pack("<HI", prefix, 0x12345678) + struct.pack(">H", action)
+    ack = struct.pack("<HI", 0x1800, 0x12345678) + struct.pack(">H", 0)
+    client = _make_client([ring, ack])
+    channel = MagicMock(response_queue=asyncio.Queue())
+    await ctpp_init_sequence(client, channel, "SB000004", 2, "SB0000042", 0x12345678)
+    assert channel.response_queue.get_nowait() == ring
+    assert channel.response_queue.empty()
+    assert client.read_response.await_count == 2

@@ -56,10 +56,14 @@
       "init": {
         "title": "Comelit Intercom Options",
         "data": {
-          "enable_notifications": "Enable doorbell notifications"
+          "enable_notifications": "Enable doorbell notifications",
+          "video_quality": "Video quality",
+          "microphone_gain": "Microphone amplification (phone to entrance)"
         },
         "data_description": {
-          "enable_notifications": "Receive doorbell ring and missed call events from the intercom"
+          "enable_notifications": "Receive doorbell ring and missed call events from the intercom",
+          "video_quality": "Compatible preserves existing resolutions. Maximum requests 1024x608 at 25 fps (reported by the Comelit app for MT-6741W); actual output depends on panel/firmware. Return to Compatible if video stops.",
+          "microphone_gain": "Boost only the microphone sent to the entrance. Original preserves the signal; +6 dB doubles its amplitude. Reduce the gain if speech distorts."
         }
       }
     }
@@ -132,7 +136,7 @@
     },
     "error": {
       "cannot_connect": "Failed to connect to the device",
-      "invalid_auth": "Authentication failed — check token or password",
+      "invalid_auth": "Authentication failed \u2014 check token or password",
       "token_extraction_failed": "Could not extract token from device backup",
       "unknown": "Unexpected error",
       "provisioning_failed": "Could not create a dedicated user on the device. Check the web password, or free a user slot in the device web interface."
@@ -150,13 +154,19 @@
       "message": "Failed to start video call"
     },
     "video_rtpc_not_received": {
-      "message": "Video channel not established — device did not respond"
+      "message": "Video channel not established \u2014 device did not respond"
+    },
+    "video_session_refused": {
+      "message": "The intercom refused this session (code {code}). Another manual view may already be active."
+    },
+    "video_no_media": {
+      "message": "The intercom is not sending video or audio. Close other manual views and try again."
     }
   },
   "issues": {
     "auth_failed": {
       "title": "Authentication failed",
-      "description": "Comelit Man cannot connect to {name} — the token is invalid or expired. Go to Settings → Integrations → Comelit Man and choose Re-authenticate."
+      "description": "Comelit Man cannot connect to {name} \u2014 the token is invalid or expired. Go to Settings \u2192 Integrations \u2192 Comelit Man and choose Re-authenticate."
     }
   }
 }

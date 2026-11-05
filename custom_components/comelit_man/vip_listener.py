@@ -165,6 +165,14 @@ class VipEventListener:
         self._last_seen_ts: dict[tuple[int, int], tuple[int, float]] = {}
         self._retransmit_window: float = 10.0  # seconds
 
+    @property
+    def is_running(self) -> bool:
+        """A stored listener object alone does not prove that it can receive rings."""
+        channel = self._client.get_channel("CTPP")
+        if channel is None:
+            return False
+        return bool(self._task and not self._task.done() and channel.is_open and channel is self._channel)
+
     async def start(self) -> None:
         """Attach to the existing CTPP channel and start the listener task.
 
@@ -186,9 +194,10 @@ class VipEventListener:
         open in the client registry so the coordinator can rename them for
         reuse by a video session (avoids closing/reopening the CTPP session).
         """
-        if self._task and not self._task.done():
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
+        if self._task:
+            if not self._task.done():
+                self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await self._task
         self._task = None
 
@@ -202,7 +211,10 @@ class VipEventListener:
         try:
             while True:
                 data = await queue.get()
-                await self._process_message(data)
+                try:
+                    await self._process_message(data)
+                except Exception:
+                    _LOGGER.exception("Failed processing VIP event — listener remains available for the next message")
         except asyncio.CancelledError:
             pass
 

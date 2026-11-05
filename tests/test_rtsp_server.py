@@ -2377,6 +2377,43 @@ class TestTruncatedRtpExtension:
 
 
 class TestBackchannelPcmuConversion:
+    def test_gain_can_be_lowered_during_a_session_without_resetting_queues(self):
+        from custom_components.comelit_man.rtsp_server import _alaw2linear
+
+        server = LocalRtspServer(microphone_gain=2)
+        queue = server.backchannel_queue
+        server._on_backchannel_rtp(_rtp(pt=8, payload=b"\xfa" * 160))
+        louder = _alaw2linear(queue.get_nowait()[0])
+        server.set_microphone_gain(10 ** (4 / 20))
+        server._on_backchannel_rtp(_rtp(pt=8, payload=b"\xfa" * 160))
+        quieter = _alaw2linear(queue.get_nowait()[0])
+        assert 1500 < quieter < louder
+        assert server.backchannel_queue is queue
+        assert server.backchannel_rx_count == 2
+
+    @pytest.mark.parametrize("pt", [0, 8])
+    def test_microphone_gain_doubles_quiet_speech_without_changing_frame_length(self, pt):
+        from custom_components.comelit_man.rtsp_server import _alaw2linear, _ulaw2linear
+
+        # Known G.711 samples: PCMU 0xCE = 988; PCMA 0xFA = 1008.
+        sample = 0xCE if pt == 0 else 0xFA
+        original = _ulaw2linear(sample) if pt == 0 else _alaw2linear(sample)
+        server = LocalRtspServer(microphone_gain=2)
+        server._on_backchannel_rtp(_rtp(pt=pt, payload=bytes([sample]) * 160))
+        amplified = server.backchannel_queue.get_nowait()
+        assert len(amplified) == 160
+        assert abs(_alaw2linear(amplified[0]) - 2 * original) < 100
+
+    def test_gain_preserves_silence_and_saturates_both_polarities(self):
+        from custom_components.comelit_man.rtsp_server import _alaw2linear, _microphone_gain_table
+
+        table = _microphone_gain_table(3)
+        assert table[0xD5] == 0xD5
+        assert table[0x55] == 0x55
+        assert _alaw2linear(table[0xAA]) == 32256
+        assert _alaw2linear(table[0x2A]) == -32256
+        assert _microphone_gain_table(1) == bytes(range(256))
+
     def test_pcmu_payload_converted_to_alaw(self):
         from custom_components.comelit_man.rtsp_server import _ULAW_TO_ALAW
 
@@ -2413,3 +2450,22 @@ class TestClientCount:
         assert server.client_count == 0
         server._active_clients.append(_TcpClient(writer=MagicMock()))
         assert server.client_count == 1
+
+
+@pytest.mark.parametrize("pt", [0, 8])
+def test_backchannel_strips_rtp_padding_and_extensions(pt):
+    """Headers and padding must never play as noise on the entrance speaker."""
+    server = LocalRtspServer()
+    header = struct.pack("!BBHII", 0xB1, pt, 1, 160, 42)
+    csrc = struct.pack("!I", 99)
+    extension = struct.pack("!HHI", 0xBEDE, 1, 0)
+    payload = (b"\xff" if pt == 0 else b"\xd5") * 160
+    server._on_backchannel_rtp(header + csrc + extension + payload + b"\x00\x00\x00\x04")
+    assert server.backchannel_queue.get_nowait() == b"\xd5" * 160
+
+
+@pytest.mark.parametrize("header,payload", [(0xA0, b"\xd5\x00"), (0xA0, b"\xd5\xff"), (0x40, b"\xd5")])
+def test_backchannel_rejects_invalid_padding_and_version(header, payload):
+    server = LocalRtspServer()
+    server._on_backchannel_rtp(struct.pack("!BBHII", header, 8, 1, 160, 42) + payload)
+    assert server.backchannel_queue.empty()

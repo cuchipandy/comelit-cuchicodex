@@ -372,9 +372,9 @@ rb[2], rb[3] = rb[3], (rb[2] + 1) & 0xFF
 ack_ts = struct.unpack("<I", bytes(rb))[0]
 ```
 
-Used for every `0x1800` ACK of a `0x18C0` / `0x1840` / `0x1860` event
+Used for inbound event ACKs and inbound answer handoffs
 (`video_call.py:_transform_device_ts`). Caller is `apt_addr+sub`, callee is the
-bare `apt_addr`.
+bare `apt_addr`. Do not generalize this to outbound call keepalives: see below.
 
 **2. Registration renewal ACKs — derive from our own init.**
 
@@ -392,6 +392,13 @@ _CTR_INCR_BYTE4 = 0x00010000   # byte 4 only
 _CTR_INCR_BYTE5 = 0x01000000   # byte 5 only
 _CTR_INCR_BOTH  = 0x01010000   # both
 ```
+
+MT-6741W live validation (2026-10-28): outbound mid-call keepalives require
+`self._call_counter += BYTE4`, preserving the local session ID, and target the
+entrance address. Applying the inbound transform produced five retries of the
+same event and a media stop after about 32 seconds. The local-counter ACK
+allowed CALL_END to arrive and video to resume across two lease renewals in
+a 95-second test. Registration renewal still uses regime 2, not this counter.
 
 Each call-setup message advances the session counter by one of these,
 determined by the step (see `video_call.py`). The call's initial timestamp must
@@ -451,16 +458,17 @@ Sequence (`video_call.py:start`), all on the shared connection:
 3. Open `UDPM` (`trailing_byte=1`); the media token is at
    `open_response_body[16:18]`.
 4. Create the RTP receiver, bind the local UDP socket, send two discovery
-   packets so the device learns the port, start the keepalive loop (1.5 s).
+   probes and a third media-ready packet, 300 ms apart, then start keepalive.
 5. `call_ack` with `codec_param=0x27` (outbound).
 6. Codec exchange: up to 10 reads. `0x1840/0x0008` → advance both counter bytes
    and ACK; `0x1840/0x0002` (call accepted) → advance byte 5, ACK, proceed.
 7. Open `RTPC` and `RTPC2` (RTPC2 uses the wire name `RTPC`).
 8. `rtpc_link` (`0x1840/0x000A`) using RTPC1's server id.
-9. `video_config` (`0x1840/0x001A`) at 800×480 @ 16 fps. The secondary
-   resolution field is hardcoded 320×240 — *not* half the primary.
+9. `video_config` (`0x1840/0x001A`) using the selected profile. Legacy
+   secondary bounds stay 320×240; Maximum uses 1024×608 for both bounds.
 10. Wait for the device to open its own RTPC (≤ 5 s), then ACK its link.
-11. HANGUP/ZERO (`0x1840/0x0000`), then start media.
+11. Start media, then activate audio with the extended entrance peer.
+    The MT-6741W flow omits the old HANGUP/ZERO here.
 
 ### Lease renewal (CALL_END)
 
@@ -468,11 +476,12 @@ Roughly every 30 s the device's call lease expires and it sends
 `0x1840` / action `0x0003`. Sub-code `0x0000` is the timer; `0x000E` means the
 door-open relay triggered it. Both take the same path.
 
-`_inline_reestablish` renews **on the same TCP connection** — no reconnect, no
-new session: ACK the CALL_END with the transform, re-run CTPP init, new
+`_inline_reestablish` renews media **on the same TCP connection**: ACK CALL_END using the outbound counter (inbound keeps its
+timestamp transform), re-run CTPP init, new
 call_init and codec exchange, re-send `rtpc_link` + `video_config` reusing the
-existing RTPC channels, wait for the device RTPC, HANGUP/ZERO, then send the
-renewal peer/accept (`0x1860` / `0x0070`) which is what re-opens audio.
+existing RTPC channels, wait for the device RTPC, then send an extended initial
+peer (`0x1840` / `0x0070`) and replace the audio sender with the new channel id.
+The captured `0x1860` / flag-zero peer belongs to hangup, not call acceptance.
 
 ---
 
@@ -861,3 +870,48 @@ To undo a provisioned user the page offers `reset-user.html?user=<map>.<slot>`
 - [simllll/hass-comelit-icona](https://github.com/simllll/hass-comelit-icona) — sibling fork; source of the 6742W/6741W observations, the floor-call tag, and the ONVIF backchannel convention
 - [grdw — "My intercom" series](https://grdw.nl/2023/01/28/my-intercom-part-1.html) — early ICONA reverse engineering
 - [madchicken/comelit-client](https://github.com/madchicken/comelit-client) — independent client implementation
+
+### MT-6741W live investigation — 2026-10-28
+
+The app screenshot requests min=max 1024x608, 25 fps and payload 1400. The local
+stream actually decoded as 640x240 at ~25 fps with that profile; 640x480,
+800x480, a 1000-kbps field and apartment-targeted reconfiguration also returned
+640x240. Frames were not flagged interlaced. Do not advertise 1024x608 as verified.
+
+The official app's manual-view capture supplied on 2026-10-28 resolved the
+missing audio negotiation. After video starts, send a 48-byte 0x1840 peer
+(action 0x0070 at offset 8): caller plus a four-byte `01 00 00 00` flag,
+separator, caller, and **entrance** as callee. Inner length stays 0x000e.
+The old 46-byte outbound form and apartment-targeted alternatives do not match.
+Do not insert HANGUP/ZERO before this peer: that prevented audio activation.
+Keep the peer counter consecutive with the preceding video/ACK messages.
+
+Incoming PT8 PCMA uses our **RTPC1** channel, video PT99 uses **RTPC2**, and
+outgoing PT8 uses the **device-owned RTPC** id. The audio RTPC is already opened
+during video setup, before the user enables audio. Both audio directions use
+160-byte payloads at 8 kHz / 20 ms. In UDP control, offset 12 is zero for the
+first two discovery probes and one afterwards; keeping it zero caused TCP
+media fallback in earlier tests. Continue matching microphone transport to the
+received media, with TCP supported for other firmware.
+
+The captured HD toggle changes only the LE32 field at video-config offset 20:
+0 when disabled, 1000 when enabled. Both resolution bounds stay 1024x608 and
+fps stays 25. All 576 decoded frames in this capture were **640x240**, including
+both HD-on segments. No captured microphone, authentication or PCAP data is
+included in the repository.
+
+Manual-view teardown stops microphone carriers first, closes RTPC1, RTPC2 and
+UDPM with request-id-zero END packets, then sends CALL_END, the RTPC refresh,
+zero video configuration and the flag-zero peer, awaiting each ACK. The panel's
+RTPC END is acknowledged and its final 0x1820 completes the exchange. The shared
+registration channel is retained when owned by the coordinator.
+
+Rapid reopen still failed on the tested MT-6741W; a 20-second separation
+received video and PCMA again. The coordinator therefore delays another manual
+start until that interval has elapsed after an outbound session used audio.
+An explicit Stop cancels the queued start. Inbound rings are not delayed by it.
+
+For comparison of related implementations:
+- https://github.com/simllll/hass-comelit-icona/blob/main/custom_components/comelit_intercom/icona/video_call.py
+- https://github.com/Jordi-14/ha-component-comelit-intercom/blob/main/custom_components/comelit_intercom/video/video_call.py
+- The existing feature/add_hd_video_feed branch describes the 1000-kbps HD field.

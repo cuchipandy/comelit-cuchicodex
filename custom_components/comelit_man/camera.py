@@ -8,6 +8,7 @@ import logging
 from typing import TYPE_CHECKING
 
 import aiohttp
+import voluptuous as vol
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.components.camera.webrtc import (
     WebRTCAnswer,
@@ -16,6 +17,7 @@ from homeassistant.components.camera.webrtc import (
     WebRTCSendMessage,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_platform
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
@@ -25,7 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 from .camera_utils import get_rtsp_url
-from .const import DOMAIN, MANUFACTURER
+from .const import CONF_MICROPHONE_GAIN, DEFAULT_MICROPHONE_GAIN, DOMAIN, MANUFACTURER, MICROPHONE_GAIN_PROFILES
 from .coordinator import ComelitLocalConfigEntry, ComelitLocalCoordinator
 from .entity import ComelitEntity
 from .models import Camera as CameraModel
@@ -53,6 +55,9 @@ async def async_setup_entry(
     # Add intercom camera if there are doors (i.e. the device has an intercom)
     if config.doors:
         entities.append(ComelitIntercomCamera(coordinator, entry.entry_id))
+        entity_platform.async_get_current_platform().async_register_entity_service(
+            "set_microphone_gain", {vol.Required("gain"): vol.In(MICROPHONE_GAIN_PROFILES)}, "async_set_microphone_gain"
+        )
 
     async_add_entities(entities)
 
@@ -126,6 +131,17 @@ class ComelitIntercomCamera(ComelitEntity, Camera):
         self._remove_state_cb: Callable[[], None] | None = None
         # Active go2rtc WS signaling sessions: session_id -> (ws, listen task)
         self._webrtc_sessions: dict[str, tuple[aiohttp.ClientWebSocketResponse, asyncio.Task[None]]] = {}
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str]:
+        return {
+            CONF_MICROPHONE_GAIN: str(
+                self.coordinator.config_entry.options.get(CONF_MICROPHONE_GAIN, DEFAULT_MICROPHONE_GAIN)
+            )
+        }
+
+    async def async_set_microphone_gain(self, gain: str) -> None:
+        await self.coordinator.async_set_microphone_gain(gain)
 
     @property
     def is_streaming(self) -> bool:

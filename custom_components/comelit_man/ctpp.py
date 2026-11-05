@@ -75,24 +75,31 @@ async def read_response_ctpp(
     channel: Channel,
     response_timeout: float = 5.0,
 ) -> None:
-    # Drain device's two responses (0x1800 ACK + 0x1860/0x0010 renewal request).
-    # We don't use the device's timestamp to compute our ACK — see docstring.
-    for i in range(2):
-        try:
-            async with asyncio.timeout(response_timeout):
-                resp = await client.read_response(channel)
-        except TimeoutError:
-            _LOGGER.debug("CTPP init response %d: no response (timeout)", i + 1)
-            continue
-        if len(resp) >= _CTPP_RESPONSE_MIN_LEN:
-            prefix = struct.unpack_from("<H", resp, 0)[0]
-            resp_ts = struct.unpack_from("<I", resp, 2)[0]
-            action = struct.unpack_from(">H", resp, 6)[0]
-            _LOGGER.debug(
-                "CTPP init response %d: %d bytes, prefix=0x%04X ts=0x%08X action=0x%04X",
-                i + 1,
-                len(resp),
-                prefix,
-                resp_ts,
-                action,
-            )
+    # Registration responses and unsolicited rings may interleave. Keep call
+    # events for the VIP consumer instead of swallowing them during setup.
+    deferred: list[bytes] = []
+    try:
+        for i in range(2):
+            try:
+                async with asyncio.timeout(response_timeout):
+                    resp = await client.read_response(channel)
+            except TimeoutError:
+                _LOGGER.debug("CTPP init response %d: no response (timeout)", i + 1)
+                continue
+            if len(resp) >= _CTPP_RESPONSE_MIN_LEN:
+                prefix = struct.unpack_from("<H", resp, 0)[0]
+                resp_ts = struct.unpack_from("<I", resp, 2)[0]
+                action = struct.unpack_from(">H", resp, 6)[0]
+                _LOGGER.debug(
+                    "CTPP init response %d: %d bytes, prefix=0x%04X ts=0x%08X action=0x%04X",
+                    i + 1,
+                    len(resp),
+                    prefix,
+                    resp_ts,
+                    action,
+                )
+                if prefix not in (0x1800, 0x1820) and not (prefix == 0x1860 and action == 0x0010):
+                    deferred.append(resp)
+    finally:
+        for event in deferred:
+            channel.response_queue.put_nowait(event)

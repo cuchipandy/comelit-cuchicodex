@@ -47,6 +47,9 @@ class ComelitDoorbellCard extends HTMLElement {
     this._unsub = null;
     this._micStream = null;
     this._micAvailable = false;
+    this._micWanted = false;
+    this._micError = "";
+    this._connectionGeneration = 0;
     this._starting = false;
     this._retryTimer = null;
     this._mediaStream = null;
@@ -83,6 +86,7 @@ class ComelitDoorbellCard extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this._micWanted = false;
     window.removeEventListener("location-changed", this._onLocationChanged);
     this._onLocationChanged = null;
     this._clearDismissTimer();
@@ -169,13 +173,23 @@ class ComelitDoorbellCard extends HTMLElement {
 
     // Device-side answer: opens the audio RTPC, starts PCMA TX.
     if (this._config.answer_entity) {
-      this._hass.callService("button", "press", {
-        entity_id: this._config.answer_entity,
-      });
+      try {
+        await this._hass.callService("button", "press", {
+          entity_id: this._config.answer_entity,
+        });
+      } catch (err) {
+        if (this._state !== "answered") return;
+        this._setMicEnabled(false);
+        this._state = "ringing";
+        this._updateView();
+        if (video) video.muted = true;
+        this._setStatus(`Answer failed: ${err?.message ?? err}`);
+      }
     }
   }
 
   _dismiss() {
+    this._micWanted = false;
     this._clearDismissTimer();
     this._callStop();
     this._teardownWebrtc();
@@ -218,6 +232,7 @@ class ComelitDoorbellCard extends HTMLElement {
     const entityId = this._config?.camera_entity;
     if (!entityId || !this._hass) return;
     this._starting = true;
+    const generation = ++this._connectionGeneration;
     this._setStatus("Connecting…");
 
     try {
@@ -232,6 +247,7 @@ class ComelitDoorbellCard extends HTMLElement {
       } catch (err) {
         // Older HA or transient error — proceed with defaults.
       }
+      if (generation !== this._connectionGeneration) return;
 
       const pc = new RTCPeerConnection(rtcConfig);
       this._pc = pc;
@@ -242,21 +258,41 @@ class ComelitDoorbellCard extends HTMLElement {
       // navigator.mediaDevices is undefined by Chromium design — degrade to
       // listen-only and say so.
       this._micAvailable = false;
+      this._micError = "Microphone requires HTTPS (local TLS or remote URL)";
+      let audioTransceiver;
       if (navigator.mediaDevices?.getUserMedia) {
         try {
-          this._micStream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
+          const micStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
           });
+          if (generation !== this._connectionGeneration) {
+            micStream.getTracks().forEach((t) => t.stop());
+            return;
+          }
+          this._micStream = micStream;
           const track = this._micStream.getAudioTracks()[0];
-          track.enabled = false; // transmit only after Answer
-          pc.addTransceiver(track, { direction: "sendrecv" });
+          track.enabled = this._state === "answered" && this._micWanted;
+          audioTransceiver = pc.addTransceiver(track, { direction: "sendrecv" });
           this._micAvailable = true;
         } catch (err) {
+          if (generation !== this._connectionGeneration) return;
           // Permission denied / no device — listen-only.
-          pc.addTransceiver("audio", { direction: "recvonly" });
+          this._micError = err?.name === "NotAllowedError"
+            ? "Microphone permission denied — allow it in your browser"
+            : "Microphone unavailable — check the input device";
+          audioTransceiver = pc.addTransceiver("audio", { direction: "recvonly" });
         }
       } else {
-        pc.addTransceiver("audio", { direction: "recvonly" });
+        audioTransceiver = pc.addTransceiver("audio", { direction: "recvonly" });
+      }
+      // The RTSP backchannel accepts G.711 only. Avoid negotiating Opus
+      // for the microphone: go2rtc relays codecs without transcoding them.
+      const codecs = globalThis.RTCRtpSender?.getCapabilities?.("audio")?.codecs ?? [];
+      const g711 = codecs.filter((c) =>
+        ["audio/pcma", "audio/pcmu"].includes(c.mimeType.toLowerCase())
+      ).sort((a, b) => Number(b.mimeType.toLowerCase() === "audio/pcma") - Number(a.mimeType.toLowerCase() === "audio/pcma"));
+      if (g711.length && audioTransceiver.setCodecPreferences) {
+        audioTransceiver.setCodecPreferences(g711);
       }
       this._updateMicChip();
 
@@ -313,24 +349,28 @@ class ComelitDoorbellCard extends HTMLElement {
       await pc.setLocalDescription(offer);
       // Give the browser a beat to gather host candidates for the offer SDP.
       await new Promise((resolve) => setTimeout(resolve, 500));
+      if (generation !== this._connectionGeneration) return;
       const inline = earlyCandidates.map((c) => `a=${c}\r\n`).join("");
       const offerSdp = pc.localDescription.sdp + inline;
       offerSent = true;
       console.info("comelit-doorbell: sending offer,", earlyCandidates.length, "inline candidates");
 
-      this._unsub = await this._hass.connection.subscribeMessage(
-        (msg) => this._onSignal(msg),
+      const unsub = await this._hass.connection.subscribeMessage(
+        (msg) => { if (generation === this._connectionGeneration) this._onSignal(msg); },
         {
           type: "camera/webrtc/offer",
           entity_id: entityId,
           offer: offerSdp,
         }
       );
+      if (generation !== this._connectionGeneration) unsub();
+      else this._unsub = unsub;
     } catch (err) {
+      if (generation !== this._connectionGeneration) return;
       this._setStatus(`Stream error: ${err?.message ?? err}`);
       this._scheduleRetry();
     } finally {
-      this._starting = false;
+      if (generation === this._connectionGeneration) this._starting = false;
     }
   }
 
@@ -396,6 +436,8 @@ class ComelitDoorbellCard extends HTMLElement {
   }
 
   _teardownWebrtc() {
+    ++this._connectionGeneration;
+    this._starting = false;
     if (this._retryTimer) {
       clearTimeout(this._retryTimer);
       this._retryTimer = null;
@@ -425,9 +467,11 @@ class ComelitDoorbellCard extends HTMLElement {
     this._mediaStream = null;
     this._sessionId = null;
     this._candQueue = [];
+    this._micAvailable = false;
   }
 
   _setMicEnabled(enabled) {
+    this._micWanted = enabled;
     if (!this._micStream) return;
     this._micStream.getAudioTracks().forEach((t) => {
       t.enabled = enabled;
@@ -454,7 +498,7 @@ class ComelitDoorbellCard extends HTMLElement {
       chip.classList.remove("mic-unavailable");
       chip.style.cursor = "pointer";
     } else {
-      chip.textContent = "🎤 mic needs HTTPS — use the cloud URL to talk";
+      chip.textContent = `🎤 ${this._micError || "Microphone unavailable"}`;
       chip.classList.add("mic-unavailable");
       chip.classList.remove("mic-on");
       chip.style.cursor = "default";

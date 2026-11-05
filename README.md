@@ -1,6 +1,14 @@
 ﻿# Comelit Man
 
-Home Assistant custom component for the **Comelit 6701W** WiFi video intercom. Communicates via the ICONA Bridge TCP protocol — no cloud required.
+Local Home Assistant integration for Comelit ICONA Bridge intercoms, including
+work on the **MT-6741W**. Maintained here as a fork of
+[mnestrud/comelit-man](https://github.com/mnestrud/comelit-man).
+
+**Current integration: 1.5.13.** Use `main` for the consolidated version.
+The Android Portero app is a separate project and is not distributed here.
+
+[Installation](#installation) · [Configuration](#configuration) ·
+[Changelog](CHANGELOG.md) · [Development and branches](docs/DEVELOPMENT.md)
 
 ## Features
 
@@ -24,7 +32,8 @@ Home Assistant custom component for the **Comelit 6701W** WiFi video intercom. C
 
 | Device | Firmware | Notes |
 |--------|----------|-------|
-| Comelit 6701W | 2.x | All features — door open, video, doorbell events |
+| Comelit 6701W | 2.x | Upstream-tested: door open, video, doorbell events |
+| Comelit MT-6741W | Installation-specific | Video, door opening and two-way speech tested on this installation; quiet-speech filtering remains under investigation. |
 
 **Likely compatible (same ICONA Bridge protocol):**
 - Other Comelit WiFi video door panels using the ICONA Bridge protocol on port 64100
@@ -36,13 +45,17 @@ The integration communicates via the **ICONA Bridge TCP protocol** on port 64100
 
 ### HACS (Recommended)
 
-1. Add this repository as a custom repository in HACS
+1. Add `https://github.com/cuchipandy/comelit-cuchicodex` as a custom repository in HACS (category: Integration)
 2. Install **Comelit Man**
 3. Restart Home Assistant
 
+The source on `main` is newer than the inherited `v1.5.1` tag. If HACS offers
+only that older version, use the manual instructions to install the current
+source. Repository cleanup does not create a new release.
+
 ### Manual
 
-1. Copy the `custom_components/comelit_man/` folder to your HA `config/custom_components/` directory
+1. Download the source from `main` and copy `custom_components/comelit_man/` to your HA `config/custom_components/` directory
 2. Restart Home Assistant
 
 ## Configuration
@@ -66,17 +79,32 @@ After setup, you can configure the integration via **Settings → Integrations �
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| Video quality | Compatible | Select Compatible, 800x480 for all calls, or Maximum (1024x608 at 25 fps). |
 | Enable notifications | On | Receive doorbell ring and door events. Disable if you only need video and door control, or to troubleshoot the notification connection. |
 
 Changing this setting reloads the integration automatically.
 
+### MT-6741W video and audio
+
+Select the video profile in **Configure → Video quality**. The 1024x608 / 25 fps
+profile is a request, not verified native HD: both this integration and the
+inspected official app capture received **640x240**.
+
+Manual viewing can receive entrance audio without a ring. Answering enables
+talk-back; a browser microphone requires HTTPS and permission. Manual
+microphone gain is applied in HA and can be controlled by Portero. The Android
+app's echo, noise suppression and automatic gain controls are separate.
+
+See [MT-6741W device notes](docs/MT6741W.md) for resolution findings, diagnostics,
+manual-session limits and incoming-call handling.
+
 ## Known limitations
 
-- **Single concurrent video session** — only one video stream can be active at a time. Starting a second session stops the first.
+- **Concurrent manual views** — on the tested MT-6741W, independent manual views block each other with both the official app and the physical monitor. This does not imply that an incoming call cannot ring on multiple endpoints.
 - **WiFi sleep** — the 6701W disconnects from WiFi when idle (no active call). Wake it physically (ring the bell, or press a button) before testing network connectivity. The integration reconnects automatically once the device wakes.
 - **No cloud** — requires direct LAN access to the device. Remote access via VPN or a reverse proxy is your responsibility.
 - **Fixed RTSP port** — the integration uses a fixed RTSP port (8557). If another process is using that port at HA startup, the video feed will not work. Change the port in HA configuration or free up 8557.
-- **Door open timing** — when video is active, pressing a door button opens the door then stops video after 10 seconds. This matches the Android app's behavior.
+- **Door opening during calls** — opening the door keeps the call running. If the panel stops media when the relay activates, recovery remains enabled until the user hangs up.
 
 ## Removing the integration
 
@@ -109,7 +137,7 @@ The integration does not persist any state outside the config entry, so no manua
 Systems with more than one call origin also get a doorbell event entity per
 origin, created the first time that origin rings (a floor door appears as
 "Floor call"). Doors are exposed **both** as buttons and as locks — the buttons
-carry the stop-video-after-open behaviour and existing automations; the locks
+preserve existing automations without hanging up the video call; the locks
 exist for HomeKit, voice assistants, and the lock card.
 
 `missed_call` fires when a ring's passive video session ends without the Answer button being pressed (~2 minutes after the ring), or immediately if inbound video fails to start.
@@ -289,24 +317,12 @@ Then restart HA. Debug logs include TCP connection events, channel opens, keepal
 
 ## Changelog
 
-Full history: [CHANGELOG.md](CHANGELOG.md). Recent highlights:
+Full history: [CHANGELOG.md](CHANGELOG.md).
 
-### 1.5.0
-- **Dedicated device user** — opt-in during setup: the integration creates its own account on the intercom and mints its own token, so Home Assistant and the Comelit app no longer kick each other off a shared identity
-- **Lock entities, ring sensors, per-caller doorbell entities** — doors are also locks (HomeKit/voice), last-ring + ring-count sensors restore across restarts, and each call origin gets its own event entity
-- **Broader device support** — apartment-block numeric addresses, kit-mode dropped prefixes, floor-call origin tag
-- **Fixed token auto-extraction** — the backup scan matched `facerecognitionusers.cfg` instead of `users.cfg`, breaking setup with a blank token field
-
-### 1.4.0
-- **Two-way audio validated end-to-end** — talk-back from the doorbell card to the entrance speaker, with transport-matched mic TX, 20 ms re-chunking, and PCMU→PCMA conversion
-- **Doorbell card is a full answer station** — built-in WebRTC player over HA's native signaling; works locally and remotely (Nabu Casa TURN); mic on HTTPS origins
-- **Rings during an active call fire events; real missed-call detection; video ends when nobody is watching**
-
-### 1.2.0 and earlier
-- 1.2.0 — inbound video auto-starts on ring; audio sender wired to the answer flow
-- 1.1.x — inbound call answer, `ring` standard event type, go2rtc backchannel groundwork
-- 1.0.x — first stable release; quality-scale hardening, strict typing, coverage
-- 0.1.4 — **breaking:** entity IDs derive from the integration title (see [CHANGELOG.md](CHANGELOG.md#014) if upgrading from pre-1.0)
+- **1.5.13:** incoming audio startup and native call release.
+- **1.5.12:** earlier incoming media consumption for receive-only previews.
+- **1.5.11:** live microphone gain control without reloading HA.
+- **1.5.8–1.5.10:** incoming UDP audio, listener recovery and door-release resilience.
 
 ## Acknowledgments
 
